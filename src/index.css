@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; min-height: 100%; }
+body {
+  background: #f7f7f7;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #c8201d; text-decoration: none; }
+a:hover { color: #8f1512; }
+/* Editable cells inherit the row font and stay tidy when focused. */
+input:focus { box-shadow: 0 0 0 2px rgba(200,32,29,.18); }
