@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { HashRouter, Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
 import Planning from './pages/Planning'
 import ItemBuilder from './pages/ItemBuilder'
@@ -10,7 +10,7 @@ import ManagerOverview from './pages/ManagerOverview'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/overview" element={<ManagerOverview />} />
@@ -21,6 +21,6 @@ export default function App() {
         <Route path="/settlement-statement" element={<SettlementStatement />} />
         <Route path="/artist-portal" element={<ArtistPortal />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
