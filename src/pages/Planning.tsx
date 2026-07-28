@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminLayout } from '../components/AdminLayout'
-import { Btn, EditCell, EditLegend, MetricTile, PageHead } from '../components/ui'
+import { Btn, EditCell, EditLegend, MetricTile, PageHead, marginHealth } from '../components/ui'
 import { tokens as t, money } from '../lib/tokens'
 
 type Group = 'apparel' | 'acc'
@@ -46,18 +46,22 @@ const th: React.CSSProperties = {
 }
 const numTd: React.CSSProperties = { textAlign: 'right', borderBottom: `1px solid ${t.divider3}` }
 
-function MarginPill({ margin, low }: { margin: number; low: boolean }) {
+function MarginPill({ margin }: { margin: number; low?: boolean }) {
+  const h = marginHealth(margin)
   return (
     <span
       style={{
-        display: 'inline-block',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
         borderRadius: 999,
         padding: '2px 9px',
         fontWeight: 700,
-        background: low ? '#fdecea' : t.greenBg,
-        color: low ? t.red : t.greenText,
+        background: h.bg,
+        color: h.color,
       }}
     >
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: h.dot }} />
       {margin.toFixed(1)}%
     </span>
   )

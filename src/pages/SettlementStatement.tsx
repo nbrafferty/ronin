@@ -25,18 +25,18 @@ export default function SettlementStatement() {
         {/* Header row */}
         <div style={{ display: 'flex', gap: 24, padding: '14px 0', borderBottom: '1px solid #e0e0e0' }}>
           <div style={{ flex: 1 }}>
-            <div style={hdr}>ARTIST</div>
+            <div style={hdr}>VENDOR</div>
             <div style={{ fontWeight: 700, marginTop: 2 }}>Black Coyote</div>
             <div style={{ fontSize: 12, color: '#666666' }}>Dana Reyes · Tour Manager<br />Black Coyote LLC · Tax ID 32-0407341</div>
           </div>
           <div style={{ flex: 1 }}>
             <div style={hdr}>SHOW</div>
             <div style={{ fontWeight: 700, marginTop: 2 }}>Main Stage · 9:30 PM</div>
-            <div style={{ fontSize: 12, color: '#666666' }}>Saturday, May 16, 2026<br />Attendance 25,000 · $0.49/head (artist)</div>
+            <div style={{ fontSize: 12, color: '#666666' }}>Saturday, May 16, 2026<br />Attendance 25,000 · $0.49/head (vendor)</div>
           </div>
           <div style={{ flex: 1 }}>
             <div style={hdr}>DEAL TERMS · LOCKED AT ADVANCE</div>
-            <div style={{ fontWeight: 700, marginTop: 2 }}>Artist 80% / Venue 20%</div>
+            <div style={{ fontWeight: 700, marginTop: 2 }}>Vendor 80% / Venue 20%</div>
             <div style={{ fontSize: 12, color: '#666666' }}>Tax 10.25% inclusive, retained by venue<br />Credit card fee 5% · Concessionaire 5% off top</div>
           </div>
         </div>
@@ -120,13 +120,13 @@ export default function SettlementStatement() {
         {/* Artist / Venue settlement */}
         <div style={{ display: 'flex', gap: 24, marginTop: 14 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: t.heading, marginBottom: 6 }}>Artist settlement (80%)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: t.heading, marginBottom: 6 }}>Vendor settlement (80%)</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <tbody>
                 <tr><td style={{ ...cellL, color: t.secondary }}>Apparel</td><td style={{ padding: '5px 0', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>$7,730.81</td></tr>
                 <tr><td style={{ ...cellL, color: t.secondary }}>Music</td><td style={{ padding: '5px 0', textAlign: 'right', borderBottom: '1px solid #f0f0f0', color: t.muted2 }}>$0.00</td></tr>
                 <tr><td style={{ ...cellL, color: t.secondary }}>Other</td><td style={{ padding: '5px 0', textAlign: 'right', borderBottom: '1px solid #f0f0f0' }}>$175.10</td></tr>
-                <tr><td style={{ padding: '6px 0', fontWeight: 700, color: t.red }}>Total due artist</td><td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 800, color: t.red }}>$7,905.91</td></tr>
+                <tr><td style={{ padding: '6px 0', fontWeight: 700, color: t.red }}>Total due vendor</td><td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 800, color: t.red }}>$7,905.91</td></tr>
               </tbody>
             </table>
           </div>
@@ -146,12 +146,12 @@ export default function SettlementStatement() {
         {/* Final payment box */}
         <div style={{ marginTop: 16, border: '1.5px solid #111111', borderRadius: 4, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: 12, lineHeight: 1.5 }}>
-            <b>Final payment.</b> Venue collected $12,190.00 via Ronin POS — venue owes artist.
+            <b>Final payment.</b> Venue collected $12,190.00 via Ronin POS — venue owes vendor.
             <br />
             <span style={{ color: '#666666' }}>Paid via Stripe ACH to Black Coyote LLC ····6712 · lands next business day. No check to follow.</span>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={hdr}>PAID TO ARTIST</div>
+            <div style={hdr}>PAID TO VENDOR</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: t.heading }}>$7,905.91</div>
           </div>
         </div>

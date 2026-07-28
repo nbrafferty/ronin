@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { tokens as t } from '../lib/tokens'
+import { RoleSwitcher, useRole, roleMeta } from '../lib/roles'
 
 /** RONIN logo block used in the sidebar. */
 export function Logo() {
@@ -28,10 +29,16 @@ const topNav: NavItem[] = [
 
 const merchRoutes: Record<string, string | undefined> = {
   Overview: '/overview',
+  Configurations: '/configurations',
   'Merch Planning': '/planning',
   'Counts (In/Out)': '/counts',
+  Reconciliation: '/reconciliation',
   Settlement: '/settlement',
+  Terms: '/terms',
 }
+
+// Screens deferred past the October scope get a muted "later" tag (Planning module).
+const deferred = new Set(['Merch Planning'])
 
 function NavRow({ item, active }: { item: NavItem; active: boolean }) {
   if (item.header) {
@@ -57,22 +64,26 @@ function NavRow({ item, active }: { item: NavItem; active: boolean }) {
     ? { color: t.red, fontWeight: 700, background: t.redTintBg, borderRight: `3px solid ${t.red}` }
     : {}
   const style = { ...base, ...activeStyle, color: activeStyle.color ?? t.secondary, display: 'block', textDecoration: 'none' }
+  const tag = deferred.has(item.label) ? (
+    <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.06em', color: t.faint, border: `1px solid ${t.divider}`, borderRadius: 3, padding: '0 4px', marginLeft: 6, verticalAlign: 1 }}>LATER</span>
+  ) : null
   const to = item.to
-  if (to) return <Link to={to} style={style}>{item.label}</Link>
-  return <div style={{ ...style, cursor: 'default' }}>{item.label}</div>
+  if (to) return <Link to={to} style={style}>{item.label}{tag}</Link>
+  return <div style={{ ...style, cursor: 'default' }}>{item.label}{tag}</div>
 }
 
 export function Sidebar({ active, showOverview }: { active?: string; showOverview?: boolean }) {
   const merch: NavItem[] = [
     { label: 'Merchandise', header: true },
-    ...(showOverview ? [{ label: 'Overview', indent: true }] : []),
+    { label: 'Overview', indent: true },
     { label: 'Configurations', indent: true },
     { label: 'Merch Planning', indent: true },
-    { label: 'Add Artist/Company', indent: true },
-    { label: 'Add Merch Items', indent: true },
+    { label: 'Add Vendor/Company', indent: true },
     { label: 'Counts (In/Out)', indent: true },
+    { label: 'Reconciliation', indent: true },
     { label: 'Settlement', indent: true },
     { label: 'Merch reports', indent: true },
+    { label: 'Terms', indent: true },
   ].map((i) => ({ ...i, to: merchRoutes[i.label] }))
 
   return (
@@ -100,6 +111,8 @@ export function Sidebar({ active, showOverview }: { active?: string; showOvervie
 }
 
 export function TopBar() {
+  const { role } = useRole()
+  const who = roleMeta[role]
   return (
     <header
       style={{
@@ -144,6 +157,7 @@ export function TopBar() {
         Spring Music Fest 2026 <span style={{ color: t.muted2 }}>▾</span>
       </div>
       <div style={{ flex: 1 }} />
+      <RoleSwitcher />
       <div
         style={{
           position: 'relative',
@@ -195,7 +209,7 @@ export function TopBar() {
             width: 28,
             height: 28,
             borderRadius: '50%',
-            background: t.red,
+            background: who.avatarBg,
             color: '#fff',
             fontSize: 10.5,
             fontWeight: 700,
@@ -204,12 +218,12 @@ export function TopBar() {
             justifyContent: 'center',
           }}
         >
-          AD
+          {who.initials}
         </div>
         <div style={{ fontSize: 11, lineHeight: 1.25 }}>
-          <b>Alex Diaz</b>
+          <b>{who.who.split(' · ')[0]}</b>
           <br />
-          <span style={{ color: t.muted2 }}>Admin</span>
+          <span style={{ color: t.muted2 }}>{who.label}</span>
         </div>
       </div>
     </header>
@@ -220,6 +234,17 @@ export function TopBar() {
  * Shared admin chrome: 196px sidebar + top bar, page content in `children`.
  * `rail` renders an optional secondary column between sidebar and main (Counts uses this).
  */
+function ScopeStrip() {
+  const { role, scopeLabel } = useRole()
+  if (role === 'organizer') return null
+  return (
+    <div style={{ background: role === 'vendor' ? '#1a1a1a' : '#22402a', color: '#fff', fontSize: 11.5, padding: '5px 24px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontWeight: 700 }}>{roleMeta[role].label} view</span>
+      <span style={{ opacity: 0.75 }}>scoped to {scopeLabel} — {roleMeta[role].who}</span>
+    </div>
+  )
+}
+
 export function AdminLayout({
   active,
   showOverview,
@@ -236,6 +261,7 @@ export function AdminLayout({
       <Sidebar active={active} showOverview={showOverview} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <TopBar />
+        <ScopeStrip />
         {rail ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
             {rail}

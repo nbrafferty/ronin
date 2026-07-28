@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminLayout } from '../components/AdminLayout'
-import { Btn, EditCell, PageHead } from '../components/ui'
+import { Btn, EditCell, PageHead, RateModeToggle } from '../components/ui'
 import { tokens as t, money } from '../lib/tokens'
+import { eventConfig as cfg, type CustomDeduction } from '../lib/config'
 
 type Step = 'fees' | 'sign-off' | 'payout'
 const order: Step[] = ['fees', 'sign-off', 'payout']
@@ -53,28 +54,45 @@ const connector = <div style={{ flex: 1, height: 1.5, background: '#e0e0e0', mar
 export default function Settlement() {
   const [step, setStep] = useState<Step>('fees')
   const [method, setMethod] = useState<'Stripe ACH' | 'Check'>('Stripe ACH')
-  const [taxRate, setTaxRate] = useState(10.25)
-  const [ccRate, setCcRate] = useState(5)
-  const [concRate, setConcRate] = useState(5)
+  // Custom deductions the manager adds at settlement (concessionaire already contracted; e.g. shipping, staff).
+  const [customs, setCustoms] = useState<CustomDeduction[]>([
+    { id: 1, label: 'Shipping (return freight)', mode: '$', value: 140, basis: 'flat' },
+  ])
+  // Pause/queue the payout to a configurable release date.
+  const [queued, setQueued] = useState(false)
+  const [releaseDate, setReleaseDate] = useState('2026-05-20')
 
   const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
   const idx = order.indexOf(step)
 
+  // Pre-event fee rates are LOCKED (contracted, from Configurations) — read-only here.
+  const { salesTaxPct: taxRate, creditCardPct: ccRate, concessionairePct: concRate } = cfg.fees
+
   // Live settlement math — inclusive sales tax, CC fee on credit receipts, concessionaire off the top.
   // The handoff's canonical inclusive-tax figure is $1,133.11 at 10.25% (computed per sales category in
   // the settlement statement), which the flat gross×r/(1+r) formula misses by ~$0.20. We anchor to the
-  // canonical value so the default settlement matches the pitch numbers ($7,905.91 due artist) exactly
-  // across every screen, and scale proportionally when the rate is edited.
+  // canonical value so the default settlement matches the pitch numbers ($7,905.91 due vendor) exactly.
   const TAX_ANCHOR = 1133.11
   const TAX_DEFAULT_RATE = 10.25
   const taxAmt = TAX_ANCHOR * (taxRate / TAX_DEFAULT_RATE)
   const ccAmt = CREDIT * (ccRate / 100)
   const concAmt = GROSS * (concRate / 100)
-  const adjGross = GROSS - taxAmt - ccAmt - concAmt
-  const dueArtist = adjGross * 0.8
-  const venueCut = adjGross * 0.2
+  const customAmt = (c: CustomDeduction) => (c.mode === '%' ? (GROSS * c.value) / 100 : c.value)
+  const customTotal = customs.reduce((a, c) => a + customAmt(c), 0)
+  const adjGross = GROSS - taxAmt - ccAmt - concAmt - customTotal
+  const dueArtist = adjGross * (cfg.defaultSplit.vendor / 100)
+  const venueCut = adjGross * (cfg.defaultSplit.venue / 100)
   const dueVenue = venueCut + taxAmt
   const methodNote = method === 'Check' ? 'mailed within 7 days' : 'lands next business day'
+
+  const setCustom = (id: number, patch: Partial<CustomDeduction>) => setCustoms((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  const addCustom = () => setCustoms((cs) => [...cs, { id: (cs.at(-1)?.id ?? 0) + 1, label: 'New deduction', mode: '$', value: 0, basis: 'flat' }])
+  const removeCustom = (id: number) => setCustoms((cs) => cs.filter((c) => c.id !== id))
+  const lockChip = (rate: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: t.rowBg, border: `1px solid ${t.cardBorder}`, borderRadius: 3, padding: '3px 8px', fontWeight: 600, color: t.secondary }}>
+      {rate} <span style={{ fontSize: 9.5, color: t.faint }}>🔒</span>
+    </span>
+  )
 
   const chipState = (i: number): 'done' | 'active' | 'upcoming' => (idx > i ? 'done' : idx === i ? 'active' : 'upcoming')
 
@@ -112,7 +130,7 @@ export default function Settlement() {
           {connector}
           <Chip state={chipState(0)} mark={chipState(0) === 'done' ? '✓' : '3'} label="Fees & taxes" sub="rates from Configurations" />
           {connector}
-          <Chip state={chipState(1)} mark={chipState(1) === 'done' ? '✓' : '4'} label="Artist sign-off" sub="certify & lock" />
+          <Chip state={chipState(1)} mark={chipState(1) === 'done' ? '✓' : '4'} label="Vendor sign-off" sub="certify & lock" />
           {connector}
           <Chip state={chipState(2)} mark={chipState(2) === 'done' ? '✓' : '5'} label="Payout" sub="Stripe / ACH" />
         </div>
@@ -126,7 +144,7 @@ export default function Settlement() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: `1px solid ${t.divider}` }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: t.heading }}>Fees &amp; deductions</div>
                     <div style={{ fontSize: 11, color: t.muted2 }}>
-                      <span style={{ display: 'inline-block', width: 10, height: 10, background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 2, verticalAlign: -1 }} /> editable this event
+                      🔒 contracted rates locked · from <Link to="/configurations">Configurations</Link>
                     </div>
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -159,35 +177,50 @@ export default function Settlement() {
                       <tr>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, color: t.body2 }}>Sales tax <span style={{ color: t.faint }}>(inclusive)</span></td>
                         <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, color: t.muted }}>gross sales</td>
-                        <td style={{ padding: '5px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 3, padding: '3px 6px', fontWeight: 600 }}>
-                            <EditCell value={taxRate} type="number" minWidth={34} onChange={(v) => setTaxRate(num(v))} />%
-                          </span>
-                        </td>
+                        <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>{lockChip(`${taxRate.toFixed(2)}%`)}</td>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right', color: t.secondary }}>−{money2(taxAmt)}</td>
                       </tr>
                       <tr>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, color: t.body2 }}>Credit card fee</td>
                         <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, color: t.muted }}>credit receipts {money(CREDIT)}</td>
-                        <td style={{ padding: '5px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 3, padding: '3px 6px', fontWeight: 600 }}>
-                            <EditCell value={ccRate.toFixed(2)} type="number" minWidth={38} onChange={(v) => setCcRate(num(v))} />%
-                          </span>
-                        </td>
+                        <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>{lockChip(`${ccRate.toFixed(2)}%`)}</td>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right', color: t.secondary }}>−{money2(ccAmt)}</td>
                       </tr>
                       <tr>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, color: t.body2 }}>Concessionaire</td>
-                        <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, color: t.muted }}>
-                          <span style={{ display: 'inline-block', background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 3, padding: '3px 8px', fontSize: 12, fontWeight: 600 }}>off top ▾</span>
-                        </td>
-                        <td style={{ padding: '5px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 3, padding: '3px 6px', fontWeight: 600 }}>
-                            <EditCell value={concRate.toFixed(2)} type="number" minWidth={38} onChange={(v) => setConcRate(num(v))} />%
-                          </span>
-                        </td>
+                        <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, color: t.muted }}>off top</td>
+                        <td style={{ padding: '11px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>{lockChip(`${concRate.toFixed(2)}%`)}</td>
                         <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right', color: t.secondary }}>−{money2(concAmt)}</td>
                       </tr>
+
+                      {/* Custom deduction rows — flat $ or % toggle */}
+                      {customs.map((c) => (
+                        <tr key={c.id}>
+                          <td style={{ padding: '7px 18px', borderBottom: `1px solid ${t.divider2}` }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <button onClick={() => removeCustom(c.id)} title="Remove" style={{ fontFamily: 'inherit', border: 'none', background: 'none', color: t.faint, cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
+                              <EditCell value={c.label} align="left" minWidth={150} onChange={(v) => setCustom(c.id, { label: v })} />
+                            </span>
+                          </td>
+                          <td style={{ padding: '7px 12px', borderBottom: `1px solid ${t.divider2}`, color: t.muted }}>custom deduction</td>
+                          <td style={{ padding: '7px 12px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', background: t.editBg, border: `1px solid ${t.editBorder}`, borderRadius: 3, padding: '3px 6px', fontWeight: 600 }}>
+                                {c.mode === '$' ? '$' : ''}<EditCell value={c.mode === '$' ? c.value.toFixed(2) : String(c.value)} type="number" minWidth={40} onChange={(v) => setCustom(c.id, { value: num(v) })} />{c.mode === '%' ? '%' : ''}
+                              </span>
+                              <RateModeToggle mode={c.mode} onChange={(m) => setCustom(c.id, { mode: m })} />
+                            </span>
+                          </td>
+                          <td style={{ padding: '7px 18px', borderBottom: `1px solid ${t.divider2}`, textAlign: 'right', color: t.secondary }}>−{money2(customAmt(c))}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td colSpan={4} style={{ padding: '8px 18px', borderBottom: `1px solid ${t.divider2}` }}>
+                          <button onClick={addCustom} style={{ fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: t.red, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add custom deduction</button>
+                          <span style={{ fontSize: 11, color: t.muted2, marginLeft: 10 }}>e.g. concessionaire, shipping, staff · flat $ or %</span>
+                        </td>
+                      </tr>
+
                       <tr>
                         <td style={{ padding: '13px 18px', fontWeight: 700, color: t.heading, background: t.rowBg }}>Adjusted gross</td>
                         <td style={{ padding: '13px 12px', background: t.rowBg }} />
@@ -199,20 +232,20 @@ export default function Settlement() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
                   <Btn size="lg" style={{ padding: '9px 18px' }}>← Reconcile</Btn>
-                  <Btn variant="primary" size="lg" style={{ padding: '9px 22px' }} onClick={() => setStep('sign-off')}>Next: Artist sign-off →</Btn>
+                  <Btn variant="primary" size="lg" style={{ padding: '9px 22px' }} onClick={() => setStep('sign-off')}>Next: Vendor sign-off →</Btn>
                 </div>
               </>
             )}
 
-            {/* STEP 4 — Artist sign-off */}
+            {/* STEP 4 — Vendor sign-off */}
             {step === 'sign-off' && (
               <>
                 <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '20px 22px' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: t.heading, marginBottom: 12 }}>Artist sign-off</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: t.heading, marginBottom: 12 }}>Vendor sign-off</div>
                   <div style={{ border: '1px solid #eeeeee', borderRadius: 6, padding: '4px 16px', marginBottom: 14, fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Gross sales</span><b>{money2(GROSS)}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Adjusted gross</span><b>{money2(adjGross)}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Due to artist (80% split, locked)</span><b style={{ color: t.red }}>{money2(dueArtist)}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Due to vendor (80% split, locked)</span><b style={{ color: t.red }}>{money2(dueArtist)}</b></div>
                   </div>
                   <p style={{ margin: '0 0 16px', fontSize: 11.5, lineHeight: 1.6, color: t.muted }}>
                     By signing, you certify on behalf of Black Coyote that you have reviewed the figures above and, to the best of your knowledge, they are correct. In the absence of a formal invoice, this settlement statement serves as the record of monies due in connection with merchandise gross sales at Spring Music Fest 2026.
@@ -228,7 +261,7 @@ export default function Settlement() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <Btn size="lg" style={{ flex: 1, padding: '11px 0' }}>Request e-signature via Artist Portal</Btn>
+                    <Btn size="lg" style={{ flex: 1, padding: '11px 0' }}>Request e-signature via Vendor Portal</Btn>
                     <Btn variant="primary" size="lg" style={{ flex: 1, padding: '11px 0' }} onClick={() => setStep('payout')}>Mark settled &amp; lock</Btn>
                   </div>
                   <div style={{ textAlign: 'center', fontSize: 11.5, color: t.muted2, marginTop: 10 }}>
@@ -249,18 +282,37 @@ export default function Settlement() {
                   <div style={{ fontSize: 14, fontWeight: 700, color: t.heading, marginBottom: 14 }}>Send payout to Black Coyote</div>
                   <div style={{ border: '1px solid #eeeeee', borderRadius: 6, padding: '4px 16px', marginBottom: 14, fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Adjusted gross</span><b>{money2(adjGross)}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Artist split (80%, locked)</span><b>{money2(dueArtist)}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Venue collected via Ronin POS</span><span style={{ color: t.body2 }}>{money2(GROSS)} — venue owes artist</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Vendor split (80%, locked)</span><b>{money2(dueArtist)}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Venue collected via Ronin POS</span><span style={{ color: t.body2 }}>{money2(GROSS)} — venue owes vendor</span></div>
                   </div>
-                  <div style={{ border: `1px solid ${t.redTintBorder}`, background: t.redTintBg, borderRadius: 6, padding: '14px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                  <div style={{ border: `1px solid ${t.redTintBorder}`, background: t.redTintBg, borderRadius: 6, padding: '14px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
                     <div><b>{method}</b> · Black Coyote LLC ····6712<br /><span style={{ fontSize: 12, color: t.redOnTint }}>{methodNote}</span></div>
                     <span style={{ fontSize: 12, color: t.red, fontWeight: 600, cursor: 'pointer' }} onClick={() => setMethod((m) => (m === 'Stripe ACH' ? 'Check' : 'Stripe ACH'))}>Change ▾</span>
                   </div>
-                  <Btn variant="primary" block style={{ fontSize: 14.5, padding: '13px 0' }}>Send payout — {money2(dueArtist)}</Btn>
-                  <div style={{ textAlign: 'center', fontSize: 11.5, color: t.muted2, marginTop: 10 }}>A settlement statement is emailed to the artist automatically.</div>
+
+                  {/* Pause / queue payout to a configurable release date */}
+                  <div style={{ border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '12px 16px', marginBottom: 16, background: queued ? '#fdf6ec' : '#fff' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: t.body2, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={queued} onChange={(e) => setQueued(e.target.checked)} />
+                      <b>Pause &amp; queue this payout</b> until a release date
+                    </label>
+                    {queued && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 12.5, color: t.secondary }}>
+                        Release on
+                        <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} style={{ fontFamily: 'inherit', fontSize: 12.5, padding: '5px 8px', border: `1px solid ${t.inputBorder}`, borderRadius: 4 }} />
+                        <span style={{ fontSize: 11.5, color: '#8a5d12' }}>— held in the queue; auto-releases on this date.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <Btn variant="primary" block style={{ fontSize: 14.5, padding: '13px 0' }}>{queued ? `Queue payout — ${money2(dueArtist)}` : `Send payout — ${money2(dueArtist)}`}</Btn>
+                  <div style={{ textAlign: 'center', fontSize: 11.5, color: t.muted2, marginTop: 10 }}>A settlement statement is emailed to the vendor automatically.</div>
+                </div>
+                <div style={{ background: t.redTintBg, border: `1px solid ${t.redTintBorder}`, borderRadius: 6, padding: '12px 16px', marginTop: 12, fontSize: 12, color: t.redOnTint, lineHeight: 1.5 }}>
+                  <b style={{ color: t.red }}>Flagship: fast, clear payouts.</b> Statements auto-email to the vendor / their merch company (e.g. Bravado) — next business day vs 30–45 days with legacy merch companies. This summary compiles Ronin's vendor payout worksheet line items (detailed builder to mirror Jeff's worksheet).
                 </div>
                 <div style={{ marginTop: 16 }}>
-                  <Btn size="lg" style={{ padding: '9px 18px' }} onClick={() => setStep('sign-off')}>← Artist sign-off</Btn>
+                  <Btn size="lg" style={{ padding: '9px 18px' }} onClick={() => setStep('sign-off')}>← Vendor sign-off</Btn>
                 </div>
               </>
             )}
@@ -269,7 +321,7 @@ export default function Settlement() {
           {/* Sticky right rail */}
           <div style={{ width: railWidth, flex: 'none', display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 20 }}>
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderLeft: `3px solid ${t.red}`, borderRadius: 6, padding: '14px 16px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>DUE ARTIST</div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>DUE VENDOR</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: t.heading, margin: '3px 0 2px' }}>{money2(dueArtist)}</div>
               <div style={{ fontSize: 11.5, color: t.muted }}>80% of adjusted gross · split locked at advance</div>
             </div>
@@ -279,7 +331,7 @@ export default function Settlement() {
               <div style={{ fontSize: 11.5, color: t.muted }}>20% cut {money2(venueCut)} + tax retained {money2(taxAmt)}</div>
             </div>
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '14px 16px', fontSize: 12, color: t.secondary, lineHeight: 1.5 }}>
-              <b style={{ color: t.heading }}>Venue collected {money(GROSS)}</b> via Ronin POS — funds are already in the system, so the venue owes the artist. No check to follow.
+              <b style={{ color: t.heading }}>Venue collected {money(GROSS)}</b> via Ronin POS — funds are already in the system, so the venue owes the vendor. No check to follow.
             </div>
             <div style={{ background: t.redTintBg, border: `1px solid ${t.redTintBorder}`, borderRadius: 6, padding: '14px 16px', fontSize: 12, lineHeight: 1.5 }}>
               <b style={{ color: t.heading }}>{method}</b> <span style={{ color: '#666666' }}>····6712</span>

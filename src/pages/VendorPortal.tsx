@@ -12,7 +12,17 @@ const items = [
   { name: 'Red/White Trucker Hat', inC: 40, sold: 15, left: 25, gross: '$270' },
 ]
 
-export default function ArtistPortal() {
+// Real-time sales feed — lets a vendor or their rep (e.g. Bravado) watch sales remotely, off-site.
+const feed = [
+  { t: '10:47 PM', txt: 'Black Logo Tee · L ×2', amt: '$80' },
+  { t: '10:46 PM', txt: 'Circle Logo Hoodie · M', amt: '$60' },
+  { t: '10:44 PM', txt: 'Black Logo Tee · XL', amt: '$40' },
+  { t: '10:43 PM', txt: 'Red/White Trucker Hat', amt: '$18' },
+  { t: '10:41 PM', txt: 'Black Logo Tee · M ×3', amt: '$120' },
+  { t: '10:39 PM', txt: 'Circle Logo Hoodie · L', amt: '$60' },
+]
+
+export default function VendorPortal() {
   const [stage, setStage] = useState<Stage>('queued')
   const sent = stage === 'sent' || stage === 'landed'
   const landed = stage === 'landed'
@@ -33,9 +43,10 @@ export default function ArtistPortal() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: '.14em', color: t.heading }}>RONIN</span>
           <span style={{ width: 3, height: 3 }} />
-          <span style={{ fontSize: 11, letterSpacing: '.18em', color: '#8a8a8a', fontWeight: 600 }}>ARTIST PORTAL</span>
+          <span style={{ fontSize: 11, letterSpacing: '.18em', color: '#8a8a8a', fontWeight: 600 }}>VENDOR PORTAL</span>
         </div>
         <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: t.secondary2, background: t.pageBg, border: `1px solid ${t.cardBorder}`, borderRadius: 999, padding: '3px 10px' }}>🔗 Remote view · no on-site access needed</span>
         <div style={{ fontSize: 12.5, color: t.secondary2 }}>Spring Music Fest 2026 <span style={{ color: '#bbbbbb' }}>·</span> Sat May 16</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1a1a1a', color: '#fff', fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>TM</div>
@@ -135,6 +146,25 @@ export default function ArtistPortal() {
               <TimelineNode mark={dot3.mark} bg={dot3.bg} color={dot3.color} border={dot3.border} title="Payout sent · Stripe ACH" sub="Sun 9:00 AM" line />
               <TimelineNode mark={dot4.mark} bg={dot4.bg} color={dot4.color} border={dot4.border} title="In your account" sub="Mon, next business day" />
             </div>
+          </div>
+        </div>
+
+        {/* Real-time sales feed */}
+        <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 8, overflow: 'hidden', marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: `1px solid ${t.divider}` }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading }}>Live sales feed</div>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: t.red }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: t.red }} /> streaming
+            </span>
+          </div>
+          <div>
+            {feed.map((f, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 18px', borderBottom: i < feed.length - 1 ? `1px solid ${t.divider3}` : 'none', fontSize: 12.5 }}>
+                <span style={{ color: t.muted2, fontVariantNumeric: 'tabular-nums', width: 62 }}>{f.t}</span>
+                <span style={{ flex: 1, color: t.body2 }}>{f.txt}</span>
+                <span style={{ fontWeight: 700, color: t.heading }}>{f.amt}</span>
+              </div>
+            ))}
           </div>
         </div>
 

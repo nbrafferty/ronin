@@ -217,6 +217,51 @@ export function EditLegend({ text = 'editable' }: { text?: string }) {
   )
 }
 
+/**
+ * Margin-health indicator — 🟢 ≥50%, 🟡 40–49.9%, 🔴 <40%.
+ * Used as a guide for less-experienced users (per the update spec).
+ */
+export function marginHealth(pct: number): { dot: string; color: string; bg: string; label: string } {
+  if (pct >= 50) return { dot: '#3d8a44', color: t.greenText, bg: t.greenBg, label: 'healthy' }
+  if (pct >= 40) return { dot: '#c98a1e', color: '#8a5d12', bg: '#fdf6ec', label: 'watch' }
+  return { dot: t.red, color: t.red, bg: '#fdecea', label: 'low' }
+}
+
+export function HealthDot({ pct }: { pct: number }) {
+  const h = marginHealth(pct)
+  return <span title={`${h.label} margin`} style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: h.dot, verticalAlign: 0 }} />
+}
+
+/** Flat-rate / percentage toggle for custom deduction rows. */
+export function RateModeToggle({ mode, onChange }: { mode: '%' | '$'; onChange: (m: '%' | '$') => void }) {
+  return (
+    <div style={{ display: 'inline-flex', border: `1.5px solid ${t.inputBorder}`, borderRadius: 4, overflow: 'hidden' }}>
+      {(['%', '$'] as const).map((m, i) => {
+        const on = mode === m
+        return (
+          <button
+            key={m}
+            onClick={() => onChange(m)}
+            style={{
+              fontFamily: 'inherit',
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '2px 9px',
+              border: 'none',
+              borderLeft: i > 0 ? `1.5px solid ${t.inputBorder}` : undefined,
+              cursor: 'pointer',
+              color: on ? t.red : t.secondary2,
+              background: on ? t.redTintBg : '#fff',
+            }}
+          >
+            {m === '%' ? '%' : 'flat $'}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Page header row: title + subtitle on the left, actions on the right. */
 export function PageHead({
   title,

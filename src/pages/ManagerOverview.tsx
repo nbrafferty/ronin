@@ -1,7 +1,10 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { AdminLayout } from '../components/AdminLayout'
 import { Btn, MetricTile, PageHead, StatusPill, type StatusKind } from '../components/ui'
 import { tokens as t } from '../lib/tokens'
+import { useRole } from '../lib/roles'
+import { eventConfig as cfg } from '../lib/config'
 
 interface Artist {
   name: string
@@ -47,17 +50,21 @@ const varColor = (v: number | null) => (v ? t.red : t.greenText2)
 const fmtVar = (v: number | null) => (v === null ? '—' : String(v))
 
 export default function ManagerOverview() {
+  const nav = useNavigate()
+  const { canSee, role } = useRole()
   const [view, setView] = useState<'table' | 'cards'>('table')
   const [filter, setFilter] = useState<StatusKind | 'all'>('all')
 
-  const visible = filter === 'all' ? artists : artists.filter((a) => a.status === filter)
+  const scoped = artists.filter((a) => canSee(a.name))
+  const visible = filter === 'all' ? scoped : scoped.filter((a) => a.status === filter)
+  const perHead = 96410 / cfg.attendance // gross today ÷ attendance
 
   return (
     <AdminLayout active="Overview" showOverview>
       <main style={{ padding: '20px 24px 32px' }}>
         <PageHead
-          title="Spring Music Fest 2026 — All Artists"
-          subtitle="Saturday, May 16, 2026 · All Booths ▾ · every artist, all merch data, one page"
+          title={role === 'organizer' ? 'Spring Music Fest 2026 — All Vendors' : 'Spring Music Fest 2026 — Your Vendors'}
+          subtitle="Saturday, May 16, 2026 · All Booths ▾ · every vendor, all merch data, one page"
           actions={
             <>
               <Btn>↥ Export</Btn>
@@ -68,11 +75,11 @@ export default function ManagerOverview() {
 
         {/* Metric tiles */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
-          <MetricTile label="ARTISTS" value="18" />
+          <MetricTile label="VENDORS" value={role === 'organizer' ? '18' : String(scoped.length)} />
           <MetricTile label="INVENTORY WORTH" value="$412,300" />
           <MetricTile label="GROSS SALES TODAY" value="$96,410" accent />
-          <MetricTile label="VARIANCES" value="11" suffix="units" />
-          <MetricTile label="UNSETTLED" value={<span style={{ color: t.red }}>5</span>} suffix="artists" />
+          <MetricTile label="PER HEAD" value={`$${perHead.toFixed(2)}`} suffix={`/ ${cfg.attendance.toLocaleString()}`} />
+          <MetricTile label="UNSETTLED" value={<span style={{ color: t.red }}>5</span>} suffix="vendors" />
         </div>
 
         {/* Filter pills + view toggle */}
@@ -132,7 +139,7 @@ export default function ManagerOverview() {
               const note = noteFor(a)
               const attention = a.status === 'ready' || !!a.variance
               return (
-                <div key={a.name} style={{ background: '#fff', border: `1px solid ${attention ? t.redTintBorder : t.cardBorder}`, borderRadius: 8, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div key={a.name} onClick={() => nav('/counts')} title="Open counts" style={{ background: '#fff', border: `1px solid ${attention ? t.redTintBorder : t.cardBorder}`, borderRadius: 8, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 14.5, fontWeight: 700, color: t.heading }}>{a.name}</div>
@@ -143,7 +150,7 @@ export default function ManagerOverview() {
                   <div style={{ display: 'flex', gap: 0, borderTop: `1px solid ${t.divider3}`, borderBottom: `1px solid ${t.divider3}`, padding: '10px 0' }}>
                     <Stat flex={1} label="SOLD" value={a.sold ? a.sold.toLocaleString() : '—'} />
                     <Stat flex={1.2} label="GROSS" value={a.gross} />
-                    <Stat flex={1.2} label="DUE ARTIST" value={a.due} />
+                    <Stat flex={1.2} label="DUE VENDOR" value={a.due} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 11.5, fontWeight: 600, color: note.color }}>{note.text}</span>
@@ -162,8 +169,8 @@ export default function ManagerOverview() {
               <thead>
                 <tr>
                   <th style={{ width: 34, borderBottom: '1px solid #eeeeee' }} />
-                  <th style={{ ...th, textAlign: 'left', padding: '10px 8px' }}>ARTIST</th>
-                  {['SKUS', 'INVENTORY WORTH', 'UNITS IN', 'SOLD', 'GROSS SALES', 'VARIANCE', 'DUE ARTIST'].map((h) => (
+                  <th style={{ ...th, textAlign: 'left', padding: '10px 8px' }}>VENDOR</th>
+                  {['SKUS', 'INVENTORY WORTH', 'UNITS IN', 'SOLD', 'GROSS SALES', 'VARIANCE', 'DUE VENDOR'].map((h) => (
                     <th key={h} style={{ ...th, textAlign: 'right', padding: '10px 10px' }}>{h}</th>
                   ))}
                   <th style={{ ...th, textAlign: 'left', padding: '10px 14px' }}>STATUS</th>
@@ -171,7 +178,7 @@ export default function ManagerOverview() {
               </thead>
               <tbody>
                 {visible.map((a) => (
-                  <tr key={a.name}>
+                  <tr key={a.name} onClick={() => nav('/counts')} title="Open counts" style={{ cursor: 'pointer' }}>
                     <td style={{ padding: '9px 0 9px 14px', borderBottom: `1px solid ${t.divider3}`, color: t.muted2, fontSize: 10 }}>▸</td>
                     <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, fontWeight: 700, color: t.heading }}>
                       {a.name} <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11 }}>{a.stage}</span>
@@ -206,7 +213,7 @@ export default function ManagerOverview() {
         )}
 
         <div style={{ fontSize: 11, color: t.muted2, marginTop: 8 }}>
-          Click an artist to expand per-item rows, or open their <a href="#">artist detail view</a> · "Ready to settle" artists queue into one-click settlement.
+          Click a vendor to expand per-item rows, or open their <a href="#">vendor detail view</a> · "Ready to settle" vendors queue into one-click settlement.
         </div>
       </main>
     </AdminLayout>
