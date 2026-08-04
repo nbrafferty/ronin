@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminLayout } from '../components/AdminLayout'
-import { Btn, EditCell, PageHead } from '../components/ui'
+import { Btn, PageHead } from '../components/ui'
 import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
 import { useCounts, type Sku } from '../lib/counts'
@@ -73,8 +73,6 @@ export default function Reconciliation() {
   /** Pre-resolution values, so a lever can be switched or undone. */
   const [orig, setOrig] = useState<Record<string, Snapshot>>({})
   const [routeOpen, setRouteOpen] = useState(false)
-
-  const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
 
   // Resolved rows stay visible so the correction it made is auditable.
   const visible = onlyFlagged ? skus.filter((s) => calc(s).variance !== 0 || res[s.id]) : skus
@@ -182,7 +180,7 @@ export default function Reconciliation() {
             <b style={{ color: t.heading }}>Each resolution corrects one column.</b>{' '}
             <b style={{ color: t.greenText }}>POS mis-ring</b> trusts the shelf and moves <b>POS Sold</b>;{' '}
             <b style={{ color: t.greenText }}>{cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : 'Damage / miscount'}</b> trusts the POS and moves <b>Counted Sold</b>;{' '}
-            <b style={{ color: t.red }}>Charge vendor</b> and <b>Festival absorbs</b> leave both counts as recorded. Corrected cells show what they were.
+            <b style={{ color: t.red }}>Charge vendor</b> and <b>Festival absorbs</b> leave both counts as recorded. Neither column is typed into directly — corrections come from the resolution, and corrected cells show what they were.
           </div>
         )}
 
@@ -199,7 +197,7 @@ export default function Reconciliation() {
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>RE-UPS</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>ENDING COUNT</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>COUNTED SOLD</th>
-                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px', color: t.red }}>POS SOLD</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>POS SOLD</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>VARIANCE</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 14px' }}>$ VARIANCE</th>
                     </tr>
@@ -231,16 +229,10 @@ export default function Reconciliation() {
                             {countedMoved && <WasNote from={before.physicalSold} />}
                           </td>
 
-                          {/* POS SOLD — moved by the "POS mis-ring" lever, and still hand-correctable */}
-                          <td style={{ padding: '5px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: posMoved ? t.greenBg : undefined }}>
-                            {posMoved ? (
-                              <>
-                                <div style={{ fontWeight: 700, color: t.greenText }}>{s.posSold}</div>
-                                <WasNote from={orig[s.id]!.posSold} />
-                              </>
-                            ) : (
-                              <EditCell value={s.posSold} type="number" minWidth={32} onChange={(v) => setSku(s.id, { posSold: num(v) })} />
-                            )}
+                          {/* POS SOLD — read-only; only a resolution can move it */}
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: posMoved ? t.greenBg : undefined }}>
+                            <div style={{ fontWeight: 700, color: posMoved ? t.greenText : t.heading }}>{s.posSold}</div>
+                            {posMoved && <WasNote from={orig[s.id]!.posSold} />}
                           </td>
                           <td style={{ padding: '9px 8px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700, color: varColor(c.variance) }}>{varLabel(c.variance)}</td>
                           <td style={{ padding: '9px 14px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 600, color: varColor(c.variance) }}>
@@ -391,7 +383,7 @@ export default function Reconciliation() {
 
             <Btn variant="primary" size="lg" onClick={() => nav('/settlement')}>Continue to Settlement →</Btn>
             <div style={{ fontSize: 11, color: t.muted2, textAlign: 'center', lineHeight: 1.5 }}>
-              Correcting a POS number here recalculates gross sales and flows through settlement and payout.
+              Resolutions recalculate gross sales and flow through settlement and payout.
             </div>
           </div>
         </div>
