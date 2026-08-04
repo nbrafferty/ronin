@@ -14,16 +14,52 @@ const varLabel = (v: number) => (v === 0 ? '0' : (v > 0 ? '+' : '−') + Math.ab
 const varColor = (v: number) => (v === 0 ? t.greenText2 : t.red)
 
 /**
- * How a SKU-level variance gets resolved. Physical counts remain the settlement basis;
- * the lever records *why* the POS disagreed and whether money moves.
+ * How a SKU-level variance gets resolved.
+ *
+ * Every lever declares which of the two sold columns it moves, so picking one visibly
+ * closes the variance on that side:
+ *   - `pos`     — the POS was wrong; snap POS SOLD to the physical count.
+ *   - `counted` — the shelf was wrong; move COUNTED SOLD to the POS via waste or a count fix.
+ *   - `null`    — both counts stand as recorded; only money moves (or nothing does).
  */
-type Resolution = 'pos-error' | 'shrink' | 'charge' | 'waive'
-const levers: { id: Resolution; label: string; hint: string; movesMoney: boolean }[] = [
-  { id: 'pos-error', label: 'POS mis-ring', hint: 'Correct the POS count — wrong size rung up', movesMoney: false },
-  { id: 'shrink', label: 'Move to shrink', hint: 'Damaged / lost — reclassify off the sold line', movesMoney: false },
-  { id: 'charge', label: 'Charge vendor', hint: 'Vendor eats the missing stock at retail', movesMoney: true },
-  { id: 'waive', label: 'Festival absorbs', hint: 'No adjustment to the payout', movesMoney: false },
+type Resolution = 'pos-error' | 'count-fix' | 'charge' | 'waive'
+type Affects = 'pos' | 'counted' | null
+
+const levers: { id: Resolution; label: string; hint: string; affects: Affects; movesMoney: boolean }[] = [
+  {
+    id: 'pos-error',
+    label: 'POS mis-ring',
+    hint: 'Trust the shelf — a wrong size was rung up. Corrects POS Sold to the counted figure.',
+    affects: 'pos',
+    movesMoney: false,
+  },
+  {
+    id: 'count-fix',
+    label: 'Damage / miscount',
+    hint: 'Trust the POS — the missing units were never sold. Corrects Counted Sold.',
+    affects: 'counted',
+    movesMoney: false,
+  },
+  {
+    id: 'charge',
+    label: 'Charge vendor',
+    hint: 'Counts stand as recorded — the vendor eats the missing stock at retail.',
+    affects: null,
+    movesMoney: true,
+  },
+  {
+    id: 'waive',
+    label: 'Festival absorbs',
+    hint: 'Counts stand as recorded — no adjustment to the payout.',
+    affects: null,
+    movesMoney: false,
+  },
 ]
+const leverById = (id: Resolution) => levers.find((l) => l.id === id)!
+
+/** The SKU fields a resolution can move, snapshotted so a lever can be undone. */
+interface Snapshot { posSold: number; shrink: number; ending: number }
+const snap = (s: Sku): Snapshot => ({ posSold: s.posSold, shrink: s.shrink, ending: s.ending })
 
 export default function Reconciliation() {
   const nav = useNavigate()
@@ -34,40 +70,67 @@ export default function Reconciliation() {
   const [view, setView] = useState<'sku' | 'overall'>('sku')
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [res, setRes] = useState<Record<string, Resolution | undefined>>({})
+  /** Pre-resolution values, so a lever can be switched or undone. */
+  const [orig, setOrig] = useState<Record<string, Snapshot>>({})
   const [routeOpen, setRouteOpen] = useState(false)
 
   const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
 
-  const visible = onlyFlagged ? skus.filter((s) => calc(s).variance !== 0) : skus
+  // Resolved rows stay visible so the correction it made is auditable.
+  const visible = onlyFlagged ? skus.filter((s) => calc(s).variance !== 0 || res[s.id]) : skus
+
+  /** The row's numbers as they stood before any resolution was applied. */
+  const baseCalc = (s: Sku) => (orig[s.id] ? calc({ ...s, ...orig[s.id] }) : calc(s))
 
   // Charges are the only lever that moves money; everything else is bookkeeping.
-  const { charges, resolvedCount } = useMemo(() => {
-    let charges = 0
-    let resolvedCount = 0
+  const charges = useMemo(() => {
+    let sum = 0
     for (const s of skus) {
-      const r = res[s.id]
-      if (!r) continue
-      if (calc(s).variance !== 0) resolvedCount++
-      if (r === 'charge') charges += Math.abs(calc(s).varianceValue)
+      if (res[s.id] === 'charge') sum += Math.abs(baseCalc(s).varianceValue)
     }
-    return { charges, resolvedCount }
-  }, [res, skus])
+    return sum
+  }, [res, skus, orig])
 
-  const allResolved = flagged.length > 0 && resolvedCount >= flagged.length
+  const resolvedCount = Object.values(res).filter(Boolean).length
+  // Still disagreeing and untouched.
+  const openCount = skus.filter((s) => calc(s).variance !== 0 && !res[s.id]).length
+  const allResolved = resolvedCount > 0 && openCount === 0
   // Settlement basis: physical counts, plus anything charged back to the vendor.
   const settlementGross = totals.physicalGross + charges
 
-  /** Apply the lever's mechanical effect so the numbers actually move. */
+  /**
+   * Apply a lever. Each one moves exactly one of the two sold columns (or neither),
+   * always computed from the row's original state so switching levers is clean.
+   */
   const applyLever = (s: Sku, lever: Resolution) => {
+    const base = orig[s.id] ?? snap(s)
+    if (!orig[s.id]) setOrig((o) => ({ ...o, [s.id]: base }))
+    const c = calc({ ...s, ...base })
+
     setRes((r) => ({ ...r, [s.id]: lever }))
-    const c = calc(s)
+
     if (lever === 'pos-error') {
-      // Trust the shelf: snap the POS number to the physical count.
-      setSku(s.id, { posSold: c.physicalSold })
-    } else if (lever === 'shrink' && c.variance < 0) {
-      // Units missing from the shelf that the POS never sold → reclassify as shrink.
-      setSku(s.id, { shrink: s.shrink + Math.abs(c.variance), ending: s.ending })
+      // Trust the shelf → POS SOLD moves to the counted figure.
+      setSku(s.id, { ...base, posSold: c.physicalSold })
+    } else if (lever === 'count-fix') {
+      // Trust the POS → COUNTED SOLD moves to the rung figure.
+      if (c.variance < 0) {
+        // Shelf says more sold than the POS rang: the difference was lost, not sold.
+        setSku(s.id, { ...base, shrink: base.shrink + Math.abs(c.variance) })
+      } else {
+        // POS rang more than the shelf supports: the ending count was overstated.
+        setSku(s.id, { ...base, ending: Math.max(0, base.ending - c.variance) })
+      }
+    } else {
+      // Charge / absorb leave both counts exactly as recorded.
+      setSku(s.id, base)
     }
+  }
+
+  /** Undo a resolution and restore the row's original counts. */
+  const clearLever = (s: Sku) => {
+    if (orig[s.id]) setSku(s.id, orig[s.id])
+    setRes((r) => ({ ...r, [s.id]: undefined }))
   }
 
   const itemName = (id: string) => items.find((i) => i.id === id)?.name ?? id
@@ -105,7 +168,7 @@ export default function Reconciliation() {
           {view === 'sku' && (
             <label style={{ fontSize: 12, color: t.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} />
-              only SKUs with a variance ({flagged.length})
+              only flagged SKUs ({openCount} open)
             </label>
           )}
           <div style={{ flex: 1 }} />
@@ -113,6 +176,15 @@ export default function Reconciliation() {
             SKU-level errors can cancel out at the top line — check both views.
           </div>
         </div>
+
+        {view === 'sku' && (
+          <div style={{ fontSize: 11.5, color: t.secondary, background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '9px 14px', marginBottom: 12, lineHeight: 1.5 }}>
+            <b style={{ color: t.heading }}>Each resolution corrects one column.</b>{' '}
+            <b style={{ color: t.greenText }}>POS mis-ring</b> trusts the shelf and moves <b>POS Sold</b>;{' '}
+            <b style={{ color: t.greenText }}>{cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : 'Damage / miscount'}</b> trusts the POS and moves <b>Counted Sold</b>;{' '}
+            <b style={{ color: t.red }}>Charge vendor</b> and <b>Festival absorbs</b> leave both counts as recorded. Corrected cells show what they were.
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -137,6 +209,11 @@ export default function Reconciliation() {
                       const c = calc(s)
                       const chosen = res[s.id]
                       const hasLevers = c.variance !== 0 || !!chosen
+                      const affects = chosen ? leverById(chosen).affects : null
+                      const before = baseCalc(s)
+                      // Which column this row's resolution moved, and what it was before.
+                      const countedMoved = affects === 'counted' && before.physicalSold !== c.physicalSold
+                      const posMoved = affects === 'pos' && (orig[s.id]?.posSold ?? s.posSold) !== s.posSold
                       const mainRow = (
                         <tr key={s.id} style={{ background: chosen ? '#fcfdfc' : undefined }}>
                           <td style={{ padding: '9px 14px', borderBottom: `1px solid ${t.divider3}` }}>
@@ -147,10 +224,23 @@ export default function Reconciliation() {
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{s.initial}</td>
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: c.added ? t.greenText2 : t.faint }}>{c.added ? `+${c.added}` : '—'}</td>
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{s.ending}</td>
-                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700, color: t.heading }}>{c.physicalSold}</td>
-                          {/* POS is correctable right here — it recalculates gross downstream */}
-                          <td style={{ padding: '5px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right' }}>
-                            <EditCell value={s.posSold} type="number" minWidth={32} onChange={(v) => setSku(s.id, { posSold: num(v) })} />
+
+                          {/* COUNTED SOLD — moved by the "damage / miscount" lever */}
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: countedMoved ? t.greenBg : undefined }}>
+                            <div style={{ fontWeight: 700, color: countedMoved ? t.greenText : t.heading }}>{c.physicalSold}</div>
+                            {countedMoved && <WasNote from={before.physicalSold} />}
+                          </td>
+
+                          {/* POS SOLD — moved by the "POS mis-ring" lever, and still hand-correctable */}
+                          <td style={{ padding: '5px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: posMoved ? t.greenBg : undefined }}>
+                            {posMoved ? (
+                              <>
+                                <div style={{ fontWeight: 700, color: t.greenText }}>{s.posSold}</div>
+                                <WasNote from={orig[s.id]!.posSold} />
+                              </>
+                            ) : (
+                              <EditCell value={s.posSold} type="number" minWidth={32} onChange={(v) => setSku(s.id, { posSold: num(v) })} />
+                            )}
                           </td>
                           <td style={{ padding: '9px 8px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700, color: varColor(c.variance) }}>{varLabel(c.variance)}</td>
                           <td style={{ padding: '9px 14px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 600, color: varColor(c.variance) }}>
@@ -166,11 +256,14 @@ export default function Reconciliation() {
                               <span style={{ fontSize: 10.5, fontWeight: 700, color: t.muted, letterSpacing: '.03em' }}>RESOLVE:</span>
                               {levers.map((l) => {
                                 const on = chosen === l.id
+                                // Label the column this lever moves, so the effect is obvious before clicking.
+                                const target = l.affects === 'pos' ? '→ POS Sold' : l.affects === 'counted' ? '→ Counted Sold' : null
+                                const label = l.id === 'count-fix' && cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : l.label
                                 return (
                                   <button
                                     key={l.id}
                                     title={l.hint}
-                                    onClick={() => (on ? setRes((r) => ({ ...r, [s.id]: undefined })) : applyLever(s, l.id))}
+                                    onClick={() => (on ? clearLever(s) : applyLever(s, l.id))}
                                     style={{
                                       fontFamily: 'inherit', fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 999, cursor: 'pointer',
                                       border: `1.5px solid ${on ? (l.movesMoney ? t.red : t.greenText2) : t.inputBorder}`,
@@ -179,14 +272,23 @@ export default function Reconciliation() {
                                       whiteSpace: 'nowrap',
                                     }}
                                   >
-                                    {on ? '● ' : ''}{l.label}
-                                    {l.movesMoney && <span style={{ fontWeight: 600 }}> ({money2(Math.abs(c.varianceValue))})</span>}
+                                    {on ? '● ' : ''}{label}
+                                    {target && <span style={{ fontWeight: 600, opacity: on ? 0.85 : 0.6 }}> {target}</span>}
+                                    {l.movesMoney && <span style={{ fontWeight: 600 }}> ({money2(Math.abs(before.varianceValue))})</span>}
                                   </button>
                                 )
                               })}
-                              <span style={{ fontSize: 11, color: t.muted2, marginLeft: 4 }}>
-                                {chosen ? levers.find((l) => l.id === chosen)?.hint : 'pick one'}
+                              <span style={{ fontSize: 11, color: chosen ? t.greenText : t.muted2, marginLeft: 4 }}>
+                                {chosen ? leverById(chosen).hint : 'pick one — each corrects a different column'}
                               </span>
+                              {chosen && (
+                                <button
+                                  onClick={() => clearLever(s)}
+                                  style={{ fontFamily: 'inherit', fontSize: 11, fontWeight: 600, color: t.muted2, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                                >
+                                  undo
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -273,7 +375,7 @@ export default function Reconciliation() {
               ) : allResolved ? (
                 <><b>✓ All variances resolved.</b> Settlement basis is {money(settlementGross, 2)} from physical counts.</>
               ) : (
-                <><b>{flagged.length - resolvedCount} SKU{flagged.length - resolvedCount === 1 ? '' : 's'} unresolved.</b> Pick a resolution on each flagged line — settlement uses the physical count as the basis.</>
+                <><b>{openCount} SKU{openCount === 1 ? '' : 's'} unresolved.</b> Pick a resolution on each flagged line — settlement uses the physical count as the basis.</>
               )}
             </div>
 
@@ -297,6 +399,15 @@ export default function Reconciliation() {
 
       <SignOffDrawer stage={routeOpen ? 'settlement' : null} onClose={() => setRouteOpen(false)} party={party} />
     </AdminLayout>
+  )
+}
+
+/** Shows the pre-resolution figure under a corrected cell so the change stays auditable. */
+function WasNote({ from }: { from: number }) {
+  return (
+    <div style={{ fontSize: 10, color: t.greenText2, marginTop: 1, whiteSpace: 'nowrap' }}>
+      was <span style={{ textDecoration: 'line-through' }}>{from}</span>
+    </div>
   )
 }
 
