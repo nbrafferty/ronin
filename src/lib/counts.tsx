@@ -70,6 +70,12 @@ const seedItems: Item[] = [
   { id: 'vinyl', partyId: 'black-coyote', name: 'Wilder Seasons LP', category: 'Music', unitCost: 9.5 },
   { id: 'trucker', partyId: 'black-coyote', name: 'Red/White Trucker Hat', category: 'Accessories', unitCost: 8.6 },
 
+  // ── Festival Merch · house-run booths (merch catalog, festival-owned)
+  { id: 'ff-tee', partyId: 'festival-merch', name: 'Furnace Fest Logo Tee', category: 'Apparel', unitCost: 6.4 },
+  { id: 'ff-crew', partyId: 'festival-merch', name: 'Lineup Crewneck', category: 'Apparel', unitCost: 16.2 },
+  { id: 'ff-hat', partyId: 'festival-merch', name: 'Furnace Fest Dad Hat', category: 'Accessories', unitCost: 7.9 },
+  { id: 'ff-comp', partyId: 'festival-merch', name: 'Furnace Fest Comp LP', category: 'Music', unitCost: 8.5 },
+
   // ── Craft vendor · Ember & Clay (ceramics)
   { id: 'mug', partyId: 'ember-clay', name: 'Stoneware Mug', category: 'Craft', unitCost: 11 },
   { id: 'planter', partyId: 'ember-clay', name: 'Hand-thrown Planter', category: 'Craft', unitCost: 18 },
@@ -117,6 +123,17 @@ const seedSkus: Sku[] = [
   mk('vinyl', 'Vinyl', 30, 60, 2, 0, 34, 24, 0.9),
   mk('vinyl', 'CD', 15, 40, 0, 0, 31, 9, 0.2),
   mk('trucker', 'OS', 18, 40, 0, 0, 25, 15, 0.3),
+
+  // Festival Merch · house booths — high volume, festival keeps 100%
+  mk('ff-tee', 'S', 32, 90, 2, 0, 41, 47),
+  mk('ff-tee', 'M', 32, 180, 4, 1, 78, 96), // POS under by 1
+  mk('ff-tee', 'L', 32, 180, 4, 2, 71, 103),
+  mk('ff-tee', 'XL', 32, 120, 2, 0, 54, 64),
+  mk('ff-crew', 'M', 55, 60, 1, 0, 28, 31, 1.2),
+  mk('ff-crew', 'L', 55, 60, 1, 1, 24, 34, 1.2),
+  mk('ff-hat', 'OS', 30, 140, 3, 0, 62, 74, 0.3),
+  mk('ff-comp', 'Vinyl', 28, 80, 2, 0, 44, 33, 0.9),
+  mk('ff-comp', 'CD', 12, 60, 0, 0, 47, 13, 0.2),
 
   // Craft · Ember & Clay — small runs, breakage instead of shrink
   mk('mug', 'Small', 28, 48, 1, 2, 19, 37, 1.1), // POS under by 1 (60 in − 1 − 2 − 19 = 38)

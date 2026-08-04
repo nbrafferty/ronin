@@ -3,7 +3,15 @@
  * A party is either an `artist` (band merch) or a `vendor` (craft, food, concessionaire).
  * The sign-off flags drive the flow when a party is brought into a show.
  */
+/** Which experience a party belongs to: Merchandise (merch catalog) or Craft (everything else). */
 export type PartyKind = 'artist' | 'vendor'
+
+/**
+ * Bucket within the experience — drives the rail's segmented control.
+ * Merchandise splits into touring `artist` merch and house-run `festival` booths;
+ * Craft has a single `vendor` bucket (the festival manager's view).
+ */
+export type PartyGroup = 'artist' | 'festival' | 'vendor'
 
 export interface Contact {
   name: string
@@ -16,6 +24,7 @@ export interface Party {
   id: string
   name: string
   kind: PartyKind
+  group: PartyGroup
   /** stage + set time for artists; booth for vendors */
   location: string
   category: string
@@ -34,6 +43,7 @@ export const parties: Party[] = [
   {
     id: 'black-coyote',
     name: 'Black Coyote',
+    group: 'artist',
     kind: 'artist',
     location: 'Main Stage · 9:30 PM',
     category: 'Band merch',
@@ -51,6 +61,7 @@ export const parties: Party[] = [
   {
     id: 'neon-harvest',
     name: 'Neon Harvest',
+    group: 'artist',
     kind: 'artist',
     location: 'Main Stage · 7:45 PM',
     category: 'Band merch',
@@ -65,6 +76,7 @@ export const parties: Party[] = [
   {
     id: 'gold-static',
     name: 'Gold Static',
+    group: 'artist',
     kind: 'artist',
     location: 'River Stage · 6:00 PM',
     category: 'Band merch',
@@ -79,6 +91,7 @@ export const parties: Party[] = [
   {
     id: 'riverline',
     name: 'Riverline',
+    group: 'artist',
     kind: 'artist',
     location: 'Tent Stage · 5:00 PM',
     category: 'Band merch · fly-in',
@@ -93,6 +106,7 @@ export const parties: Party[] = [
   {
     id: 'ember-clay',
     name: 'Ember & Clay',
+    group: 'vendor',
     kind: 'vendor',
     location: 'Craft Row · Booth 12',
     category: 'Craft · ceramics',
@@ -107,6 +121,7 @@ export const parties: Party[] = [
   {
     id: 'smokestack-bbq',
     name: 'Smokestack BBQ',
+    group: 'vendor',
     kind: 'vendor',
     location: 'Food Alley · Booth 3',
     category: 'Concessionaire · food',
@@ -121,6 +136,7 @@ export const parties: Party[] = [
   {
     id: 'iron-city-prints',
     name: 'Iron City Prints',
+    group: 'vendor',
     kind: 'vendor',
     location: 'Craft Row · Booth 7',
     category: 'Craft · posters',
@@ -135,10 +151,11 @@ export const parties: Party[] = [
   {
     id: 'festival-merch',
     name: 'Festival Merch',
-    kind: 'vendor',
+    group: 'festival',
+    kind: 'artist',
     location: 'All booths',
-    category: 'House vendor',
-    skus: 22,
+    category: 'Festival merch · house',
+    skus: 10,
     contact: { name: 'Alex Diaz', role: 'Merch Manager', email: 'alex@roninpos.com', phone: '+1 (205) 555-0100' },
     altContacts: [],
     requiresInitialSignOff: false,
@@ -150,3 +167,13 @@ export const parties: Party[] = [
 
 export const partyById = (id: string) => parties.find((p) => p.id === id)!
 export const partiesOfKind = (k: PartyKind) => parties.filter((p) => p.kind === k)
+export const partiesOfGroup = (g: PartyGroup) => parties.filter((p) => p.group === g)
+
+/** Rail buckets available inside each experience. */
+export const groupsFor = (k: PartyKind): { id: PartyGroup; label: string; addLabel: string }[] =>
+  k === 'artist'
+    ? [
+        { id: 'artist', label: 'Artists', addLabel: 'Artist' },
+        { id: 'festival', label: 'Festival Merch', addLabel: 'Booth' },
+      ]
+    : [{ id: 'vendor', label: 'Vendors', addLabel: 'Vendor' }]

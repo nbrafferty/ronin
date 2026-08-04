@@ -7,7 +7,7 @@ import { ItemBuilderForm } from '../components/ItemBuilderForm'
 import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
 import { useCounts, type Item, type Sku } from '../lib/counts'
-import { parties, partyById, type PartyKind } from '../lib/parties'
+import { parties, partyById, groupsFor, type PartyKind, type PartyGroup } from '../lib/parties'
 import { kindConfig, isConsumable, attributeFor } from '../lib/catalog'
 import { useSignOff } from '../lib/signoff'
 
@@ -15,52 +15,104 @@ const th: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: t.mute
 const varColor = (v: number) => (v === 0 ? t.greenText2 : t.red)
 const varLabel = (v: number) => (v === 0 ? '0' : (v > 0 ? '+' : '−') + Math.abs(v))
 
-/** Left rail — segmented Artists / Vendors switch with a matching add button per view. */
+/**
+ * Left rail.
+ * Merchandise splits into **Artists** and **Festival Merch** side by side;
+ * Craft shows a single **Vendors** bucket (the festival manager's view).
+ */
 function PartyRail({
   kind,
   setKind,
+  group,
+  setGroup,
   activeId,
   setActiveId,
 }: {
   kind: PartyKind
   setKind: (k: PartyKind) => void
+  group: PartyGroup
+  setGroup: (g: PartyGroup) => void
   activeId: string
   setActiveId: (id: string) => void
 }) {
-  const list = parties.filter((p) => p.kind === kind)
+  const groups = groupsFor(kind)
+  const list = parties.filter((p) => p.group === group)
+  const active = groups.find((g) => g.id === group) ?? groups[0]
+
   return (
-    <div style={{ width: 186, flex: 'none', background: '#fcfcfc', borderRight: `1px solid ${t.cardBorder}`, padding: '16px 10px' }}>
+    <div style={{ width: 208, flex: 'none', background: '#fcfcfc', borderRight: `1px solid ${t.cardBorder}`, padding: '14px 10px' }}>
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2, padding: '0 8px 8px' }}>SAT MAY 16</div>
-      <div style={{ display: 'flex', gap: 4, padding: '0 2px 10px' }}>
-        {(['artist', 'vendor'] as const).map((k) => {
+
+      {/* Experience switch — Merchandise vs Craft are separate books */}
+      <div style={{ display: 'flex', border: `1.5px solid ${t.inputBorder}`, borderRadius: 5, overflow: 'hidden', margin: '0 2px 8px' }}>
+        {([
+          ['artist', 'Merch'],
+          ['vendor', 'Craft'],
+        ] as const).map(([k, l], i) => {
           const on = kind === k
           return (
             <button
               key={k}
               onClick={() => {
                 setKind(k)
-                const first = parties.find((p) => p.kind === k)
+                const g = groupsFor(k)[0].id
+                setGroup(g)
+                const first = parties.find((p) => p.group === g)
+                if (first) setActiveId(first.id)
+              }}
+              style={{
+                flex: 1,
+                fontFamily: 'inherit',
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: '4px 0',
+                border: 'none',
+                borderLeft: i ? `1.5px solid ${t.inputBorder}` : undefined,
+                cursor: 'pointer',
+                color: on ? t.red : t.secondary2,
+                background: on ? t.redTintBg : '#fff',
+              }}
+            >
+              {l}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Bucket pills — Artists | Festival Merch, or Vendors */}
+      <div style={{ display: 'flex', gap: 4, padding: '0 2px 10px' }}>
+        {groups.map((g) => {
+          const on = group === g.id
+          return (
+            <button
+              key={g.id}
+              onClick={() => {
+                setGroup(g.id)
+                const first = parties.find((p) => p.group === g.id)
                 if (first) setActiveId(first.id)
               }}
               style={{
                 flex: 1,
                 fontFamily: 'inherit',
                 textAlign: 'center',
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: on ? 700 : 600,
                 color: on ? t.red : t.secondary2,
                 border: `1.5px solid ${on ? t.red : t.inputBorder}`,
                 borderRadius: 999,
-                padding: '4px 0',
+                padding: '4px 6px',
+                whiteSpace: 'nowrap',
                 background: on ? t.redTintBg : '#fff',
                 cursor: 'pointer',
+                lineHeight: 1.2,
               }}
             >
-              {k === 'artist' ? 'Artists' : 'Vendors'}
+              {g.label}
             </button>
           )
         })}
       </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {list.map((p) => {
           const on = p.id === activeId
@@ -88,7 +140,7 @@ function PartyRail({
           )
         })}
         <div style={{ border: `1.5px dashed ${t.faint2}`, borderRadius: 6, padding: '8px 10px', fontSize: 12, color: t.muted, textAlign: 'center', marginTop: 4, cursor: 'pointer' }}>
-          + {kindConfig[kind].addLabel.replace('Add ', '')}
+          + {active.addLabel}
         </div>
       </div>
     </div>
@@ -103,8 +155,11 @@ export default function Counts() {
   const party = partyById(partyId)
   const kind = party.kind
   const cfgK = kindConfig[kind]
+  const [group, setGroup] = useState<PartyGroup>(party.group)
   const setKind = (k: PartyKind) => {
-    const first = parties.find((p) => p.kind === k)
+    const g = groupsFor(k)[0].id
+    setGroup(g)
+    const first = parties.find((p) => p.group === g)
     if (first) setPartyId(first.id)
   }
 
@@ -182,7 +237,7 @@ export default function Counts() {
   const colCount = showMargin ? 13 : 12
 
   return (
-    <AdminLayout active="Counts (In/Out)" rail={<PartyRail kind={kind} setKind={setKind} activeId={partyId} setActiveId={setPartyId} />}>
+    <AdminLayout active="Counts (In/Out)" rail={<PartyRail kind={kind} setKind={setKind} group={group} setGroup={setGroup} activeId={partyId} setActiveId={setPartyId} />}>
       <main style={{ flex: 1, minWidth: 0, padding: '20px 24px 32px' }}>
         <PageHead
           title={`Furnace Fest 2026 — ${cfgK.countsTitle}`}
@@ -242,7 +297,7 @@ export default function Counts() {
 
             {/* Counts grid */}
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 950 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 935 }}>
                 <thead>
                   <tr>
                     <th style={{ ...th, textAlign: 'left', padding: '10px 14px', letterSpacing: '.04em' }}>ITEM</th>
