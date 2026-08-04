@@ -5,6 +5,7 @@ import { Modal } from '../components/overlays'
 import { useCounts } from '../lib/counts'
 import { useSignOff } from '../lib/signoff'
 import { partyById, type Contact } from '../lib/parties'
+import { kindConfig, isConsumable } from '../lib/catalog'
 
 type Stage = 'queued' | 'sent' | 'landed'
 type Tab = 'today' | 'settlement' | 'finalized' | 'shipping' | 'people'
@@ -20,7 +21,6 @@ const feed = [
   { t: '10:41 PM', txt: 'Black Logo Tee · M ×3', amt: '$120' },
 ]
 
-const party = partyById('black-coyote')
 const field: React.CSSProperties = { width: '100%', padding: '8px 10px', border: `1px solid ${t.inputBorder}`, borderRadius: 4, fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box' }
 const label: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: t.muted, marginBottom: 5 }
 const card: React.CSSProperties = { background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 8 }
@@ -28,7 +28,9 @@ const card: React.CSSProperties = { background: t.cardBg, border: `1px solid ${t
 export default function VendorPortal() {
   const [tab, setTab] = useState<Tab>('today')
   const [stage, setStage] = useState<Stage>('queued')
-  const { items, skus, calc, totals } = useCounts()
+  const { items, skus, calc, totals, partyId } = useCounts()
+  const party = partyById(partyId)
+  const cfgK = kindConfig[party.kind]
   const signoff = useSignOff()
 
   const sent = stage === 'sent' || stage === 'landed'
@@ -41,7 +43,7 @@ export default function VendorPortal() {
     { id: 'today', label: 'Today' },
     { id: 'settlement', label: 'Settlement', badge: signoff.settlement.status === 'requested' ? '1' : undefined },
     { id: 'finalized', label: 'Finalized Settlements' },
-    { id: 'shipping', label: 'Shipping & Labels' },
+    { id: 'shipping', label: party.kind === 'artist' ? 'Shipping & Labels' : 'Pack-out & Labels' },
     { id: 'people', label: 'My People' },
   ]
 
@@ -51,7 +53,7 @@ export default function VendorPortal() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
             <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: '.14em', color: t.heading }}>RONIN</span>
-            <span style={{ fontSize: 11, letterSpacing: '.18em', color: '#8a8a8a', fontWeight: 600 }}>VENDOR PORTAL</span>
+            <span style={{ fontSize: 11, letterSpacing: '.18em', color: '#8a8a8a', fontWeight: 600 }}>{cfgK.portalName}</span>
           </div>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11, color: t.secondary2, background: t.pageBg, border: `1px solid ${t.cardBorder}`, borderRadius: 999, padding: '3px 10px' }}>🔗 Remote view · no on-site access needed</span>
@@ -110,18 +112,18 @@ export default function VendorPortal() {
           </div>
         )}
 
-        {tab === 'today' && <TodayTab stage={stage} setStage={setStage} stageLabel={stageLabel} stageColor={stageColor} stageNote={stageNote} sent={sent} landed={landed} />}
-        {tab === 'settlement' && <SettlementTab />}
+        {tab === 'today' && <TodayTab party={party} stage={stage} setStage={setStage} stageLabel={stageLabel} stageColor={stageColor} stageNote={stageNote} sent={sent} landed={landed} />}
+        {tab === 'settlement' && <SettlementTab party={party} />}
         {tab === 'finalized' && <FinalizedTab />}
-        {tab === 'shipping' && <ShippingTab />}
-        {tab === 'people' && <PeopleTab />}
+        {tab === 'shipping' && <ShippingTab party={party} />}
+        {tab === 'people' && <PeopleTab party={party} />}
       </main>
     </div>
   )
 }
 
 /* ---------- Today: real-time sales + money timeline ---------- */
-function TodayTab({ stage, setStage, stageLabel, stageColor, stageNote, sent, landed }: any) {
+function TodayTab({ party, stage, setStage, stageLabel, stageColor, stageNote, sent, landed }: any) {
   const { items, skus, calc, totals } = useCounts()
   const dot3 = { bg: sent ? '#1a1a1a' : t.red, color: '#fff', border: sent ? '#1a1a1a' : t.red, mark: sent ? '✓' : '→' }
   const dot4 = { bg: landed ? t.red : '#fff', color: landed ? '#fff' : t.muted2, border: landed ? t.red : t.faint2, mark: landed ? '✓' : '4' }
@@ -240,7 +242,7 @@ function TodayTab({ stage, setStage, stageLabel, stageColor, stageNote, sent, la
 }
 
 /* ---------- Settlement: e-signature workflow ---------- */
-function SettlementTab() {
+function SettlementTab({ party }: { party: ReturnType<typeof partyById> }) {
   const signoff = useSignOff()
   const { totals } = useCounts()
   const [typed, setTyped] = useState('')
@@ -385,20 +387,30 @@ function FinalizedTab() {
 }
 
 /* ---------- Shipping & labels ---------- */
-function ShippingTab() {
-  const { totals, skus } = useCounts()
+function ShippingTab({ party }: { party: ReturnType<typeof partyById> }) {
+  const { totals, skus, items } = useCounts()
   const [labels, setLabels] = useState([{ id: 1, name: 'UPS_return_1of3.pdf', boxes: 1 }])
   const [boxes, setBoxes] = useState('3')
-  const weight = skus.reduce((a, s) => a + s.ending * s.weightLb, 0)
+
+  // Food and beverage are consumed on site — only shippable stock counts toward a return.
+  const shippableIds = new Set(items.filter((i) => !isConsumable(i.category)).map((i) => i.id))
+  const shippable = skus.filter((s) => shippableIds.has(s.itemId))
+  const consumable = skus.filter((s) => !shippableIds.has(s.itemId))
+  const weight = shippable.reduce((a, s) => a + s.ending * s.weightLb, 0)
+  const shippableUnits = shippable.reduce((a, s) => a + s.ending, 0)
+  const consumableUnits = consumable.reduce((a, s) => a + s.ending, 0)
+  const nothingShips = shippable.length === 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ ...card, padding: '18px 20px' }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading, marginBottom: 4 }}>Return shipment</div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading, marginBottom: 4 }}>
+          {party.kind === 'artist' ? 'Return shipment' : 'Pack-out'}
+        </div>
         <div style={{ fontSize: 11.5, color: t.muted2, marginBottom: 14 }}>Calculated from your ending counts — no manual weighing.</div>
         <div style={{ display: 'flex', gap: 12 }}>
           {[
-            ['UNSOLD UNITS', String(totals.ending)],
+            ['SHIPPABLE UNITS', String(shippableUnits)],
             ['EST. WEIGHT', `${weight.toFixed(1)} lb`],
             ['BOXES', boxes],
           ].map(([l, v]) => (
@@ -408,8 +420,23 @@ function ShippingTab() {
             </div>
           ))}
         </div>
+        {consumableUnits > 0 && (
+          <div style={{ marginTop: 12, fontSize: 11.5, color: '#8a5d12', background: '#fdf6ec', border: '1px solid #f0dcae', borderRadius: 6, padding: '10px 12px', lineHeight: 1.5 }}>
+            <b>{consumableUnits} consumable units excluded.</b> Food and beverage stock doesn't ship back — leftovers are recorded as waste on the count sheet, not returned inventory.
+          </div>
+        )}
       </div>
 
+      {nothingShips ? (
+        <div style={{ ...card, padding: '26px 20px', textAlign: 'center', color: t.secondary2 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading }}>Nothing to ship</div>
+          <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.55 }}>
+            {party.name} carries only consumable stock, so there are no return labels to generate.<br />
+            Pack-out is a booth breakdown, not a shipment.
+          </div>
+        </div>
+      ) : (
+      <>
       <div style={{ ...card, padding: '18px 20px' }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading, marginBottom: 4 }}>Upload pre-sent return labels</div>
         <div style={{ fontSize: 11.5, color: t.muted2, marginBottom: 12 }}>
@@ -441,11 +468,11 @@ function ShippingTab() {
 
       <div style={{ ...card, padding: '18px 20px' }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: t.heading, marginBottom: 4 }}>Or generate labels here</div>
-        <div style={{ fontSize: 11.5, color: t.muted2, marginBottom: 12 }}>Skip fedex.com / ups.com — return address can be your next tour stop.</div>
+        <div style={{ fontSize: 11.5, color: t.muted2, marginBottom: 12 }}>Skip fedex.com / ups.com — {party.kind === 'artist' ? 'return address can be your next tour stop' : 'ships back to your studio or shop'}.</div>
         <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
           <div style={{ flex: 2 }}>
             <div style={label}>RETURN ADDRESS</div>
-            <input defaultValue="The Ryman · 116 Rep John Lewis Way N, Nashville TN" style={field} />
+            <input defaultValue={party.kind === 'artist' ? "The Ryman · 116 Rep John Lewis Way N, Nashville TN" : "Ember & Clay Studio · 1820 3rd Ave N, Birmingham AL"} style={field} />
           </div>
           <div style={{ width: 110 }}>
             <div style={label}># BOXES</div>
@@ -455,12 +482,14 @@ function ShippingTab() {
         <Btn variant="primary">Generate {boxes} labels via ShipStation →</Btn>
         <div style={{ fontSize: 11, color: t.muted2, marginTop: 8 }}>ShipStation API integration in progress · UPS QR codes supported.</div>
       </div>
+      </>
+      )}
     </div>
   )
 }
 
 /* ---------- My people: vendor routes their own contacts ---------- */
-function PeopleTab() {
+function PeopleTab({ party }: { party: ReturnType<typeof partyById> }) {
   const [people, setPeople] = useState<Contact[]>([party.contact, ...party.altContacts])
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState<Contact>({ name: '', role: '', email: '', phone: '' })

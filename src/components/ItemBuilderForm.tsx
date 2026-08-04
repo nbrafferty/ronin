@@ -1,30 +1,25 @@
 import { useMemo, useState } from 'react'
 import { tokens as t } from '../lib/tokens'
 import { EditCell, HealthDot, marginHealth } from './ui'
-
-/**
- * Category model — structured so vendor types can expand beyond apparel later
- * (beverage w/ vessel sizes, food, retail), each with its own sizing/attribute set.
- */
-type Category = 'Apparel' | 'Music' | 'Beverage' | 'Food' | 'Retail'
-const categoryAttrs: Record<Category, { label: string; options: string[]; attrName: string }> = {
-  Apparel: { label: 'Sizes', attrName: 'size', options: ['XS', 'S', 'M', 'L', 'XL', '2XL'] },
-  Music: { label: 'Format', attrName: 'format', options: ['Vinyl', 'CD', 'Cassette'] },
-  Beverage: { label: 'Vessel size', attrName: 'vessel', options: ['12 oz', '16 oz', '20 oz', '25 oz'] },
-  Food: { label: 'Portion', attrName: 'portion', options: ['Regular', 'Large'] },
-  Retail: { label: 'Variant', attrName: 'variant', options: ['One size', 'Custom'] },
-}
+import { attributeFor, categoriesFor, type Category } from '../lib/catalog'
+import type { PartyKind } from '../lib/parties'
 
 const label: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: t.muted, marginBottom: 5 }
 const inputBox: React.CSSProperties = { border: `1px solid ${t.inputBorder}`, borderRadius: 4, padding: '9px 12px', fontSize: 13, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }
 
-export function ItemBuilderForm() {
-  const [name, setName] = useState('SS Lineup Tee')
-  const [cat, setCat] = useState<Category>('Apparel')
-  const [attrs, setAttrs] = useState<string[]>(['S', 'M', 'L', 'XL', '2XL'])
-  const [retail, setRetail] = useState(35)
-  const [blankCost, setBlankCost] = useState(3.2)
-  const [printCost, setPrintCost] = useState(3.9)
+/**
+ * One form, two catalogs. Artists (Merchandise) only see merch categories;
+ * craft vendors only see craft / food / beverage / retail.
+ */
+export function ItemBuilderForm({ kind = 'artist' }: { kind?: PartyKind }) {
+  const cats = categoriesFor(kind)
+  const isMerch = kind === 'artist'
+  const [name, setName] = useState(isMerch ? 'SS Lineup Tee' : 'Stoneware Mug')
+  const [cat, setCat] = useState<Category>(cats[0])
+  const [attrs, setAttrs] = useState<string[]>(attributeFor[cats[0]].options.slice(0, isMerch ? 5 : 2))
+  const [retail, setRetail] = useState(isMerch ? 35 : 28)
+  const [blankCost, setBlankCost] = useState(isMerch ? 3.2 : 6.0)
+  const [printCost, setPrintCost] = useState(isMerch ? 3.9 : 5.0)
 
   const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
   const cost = blankCost + printCost
@@ -33,7 +28,7 @@ export function ItemBuilderForm() {
   const health = useMemo(() => marginHealth(pct), [pct])
 
   const toggleAttr = (o: string) => setAttrs((a) => (a.includes(o) ? a.filter((x) => x !== o) : [...a, o]))
-  const conf = categoryAttrs[cat]
+  const conf = attributeFor[cat]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -45,12 +40,12 @@ export function ItemBuilderForm() {
       <div>
         <div style={label}>CATEGORY</div>
         <div style={{ display: 'flex', border: `1.5px solid ${t.inputBorder}`, borderRadius: 4, overflow: 'hidden', fontSize: 12, fontWeight: 600, textAlign: 'center' }}>
-          {(Object.keys(categoryAttrs) as Category[]).map((c, i) => {
+          {cats.map((c, i) => {
             const on = cat === c
             return (
               <button
                 key={c}
-                onClick={() => { setCat(c); setAttrs(categoryAttrs[c].options.slice(0, c === 'Apparel' ? 5 : 1)) }}
+                onClick={() => { setCat(c); setAttrs(attributeFor[c].options.slice(0, c === 'Apparel' ? 5 : 1)) }}
                 style={{ flex: 1, padding: '7px 0', border: 'none', borderLeft: i > 0 ? `1.5px solid ${t.inputBorder}` : undefined, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: on ? t.red : t.secondary2, background: on ? t.redTintBg : '#fff' }}
               >
                 {c}
@@ -59,13 +54,15 @@ export function ItemBuilderForm() {
           })}
         </div>
         <div style={{ fontSize: 11, color: t.muted2, marginTop: 5 }}>
-          Categories expand beyond apparel — each vendor type carries its own attributes (apparel sizes, beverage vessel sizes, food portions…).
+          {isMerch
+            ? 'Merchandise carries band merch only — apparel, music and accessories.'
+            : 'Vendor catalog — craft, food, beverage and retail. Each carries its own attributes (vessel sizes, portions…).'}
         </div>
       </div>
 
       {/* Category-specific sizing / attribute support */}
       <div>
-        <div style={label}>{conf.label.toUpperCase()} · {conf.attrName} attribute</div>
+        <div style={label}>{conf.label.toUpperCase()} · {conf.noun} attribute</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {conf.options.map((o) => {
             const on = attrs.includes(o)
@@ -80,7 +77,7 @@ export function ItemBuilderForm() {
             )
           })}
         </div>
-        <div style={{ fontSize: 11, color: t.muted2, marginTop: 5 }}>{attrs.length} {conf.attrName}{attrs.length === 1 ? '' : 's'} selected — each becomes a countable SKU variant.</div>
+        <div style={{ fontSize: 11, color: t.muted2, marginTop: 5 }}>{attrs.length} {conf.noun}{attrs.length === 1 ? '' : 's'} selected — each becomes a countable SKU variant.</div>
       </div>
 
       {/* Pricing */}
@@ -89,8 +86,8 @@ export function ItemBuilderForm() {
         <div style={{ display: 'flex', gap: 10 }}>
           {([
             { l: 'Retail', val: retail, set: setRetail, dp: 0 },
-            { l: 'Blank / unit', val: blankCost, set: setBlankCost, dp: 2 },
-            { l: 'Print / unit', val: printCost, set: setPrintCost, dp: 2 },
+            { l: isMerch ? 'Blank / unit' : 'Materials / unit', val: blankCost, set: setBlankCost, dp: 2 },
+            { l: isMerch ? 'Print / unit' : 'Labor / unit', val: printCost, set: setPrintCost, dp: 2 },
           ] as const).map((f) => (
             <div key={f.l} style={{ flex: 1 }}>
               <div style={{ fontSize: 10, color: t.muted2, marginBottom: 3 }}>{f.l}</div>

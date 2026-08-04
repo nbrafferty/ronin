@@ -6,6 +6,7 @@ import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
 import { useCounts, type Sku } from '../lib/counts'
 import { partyById } from '../lib/parties'
+import { kindConfig } from '../lib/catalog'
 
 const money2 = (n: number) => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const th: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: t.muted, borderBottom: '1px solid #eeeeee', letterSpacing: '.03em' }
@@ -26,8 +27,9 @@ const levers: { id: Resolution; label: string; hint: string; movesMoney: boolean
 
 export default function Reconciliation() {
   const nav = useNavigate()
-  const { items, skus, calc, setSku, totals, flagged } = useCounts()
-  const party = partyById('black-coyote')
+  const { items, skus, calc, setSku, totals, flagged, partyId } = useCounts()
+  const party = partyById(partyId)
+  const cfgK = kindConfig[party.kind]
 
   const [view, setView] = useState<'sku' | 'overall'>('sku')
   const [onlyFlagged, setOnlyFlagged] = useState(true)
@@ -75,7 +77,7 @@ export default function Reconciliation() {
       <main style={{ padding: '20px 24px 32px' }}>
         <PageHead
           title={`Reconciliation — ${party.name}`}
-          subtitle="Furnace Fest 2026 · physical counts are the source of truth · money follows the counts"
+          subtitle={`Furnace Fest 2026 · ${party.category} · physical counts are the source of truth`}
           actions={
             <>
               <Btn onClick={() => setRouteOpen(true)}>Route sign-off →</Btn>
@@ -215,7 +217,7 @@ export default function Reconciliation() {
                       ['Re-ups logged', `+${totals.added} units`, null],
                       ['Total counted in', `${totals.totalIn} units`, null],
                       ['Comps', `${totals.comp} units`, null],
-                      ['Shrink (damage / lost)', `${totals.shrink} units`, null],
+                      [cfgK.shrinkLabel === 'WASTE' ? 'Waste (spoilage / breakage)' : 'Shrink (damage / lost)', `${totals.shrink} units`, null],
                       ['Ending count', `${totals.ending} units`, null],
                     ].map(([l, v]) => (
                       <tr key={l as string}>

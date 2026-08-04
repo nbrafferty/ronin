@@ -14,8 +14,6 @@ const order: Step[] = ['fees', 'sign-off', 'payout']
 
 const money2 = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-const party = partyById('black-coyote')
-
 const inlineField: React.CSSProperties = {
   flex: 1,
   padding: '7px 10px',
@@ -66,7 +64,8 @@ const connector = <div style={{ flex: 1, height: 1.5, background: '#e0e0e0', mar
 
 export default function Settlement() {
   const nav = useNavigate()
-  const { totals: countsTotals, flagged } = useCounts()
+  const { totals: countsTotals, flagged, partyId } = useCounts()
+  const party = partyById(partyId)
   const signoff = useSignOff()
   const [signOffOpen, setSignOffOpen] = useState(false)
   const [step, setStep] = useState<Step>('fees')
@@ -80,10 +79,10 @@ export default function Settlement() {
   const [queued, setQueued] = useState(false)
   const [releaseDate, setReleaseDate] = useState('2026-05-20')
   // Settlement contact pre-populated from the vendor object, editable on this screen.
-  const [contact, setContact] = useState<Contact>(party.contact)
+  const [contact, setContact] = useState<Contact>(partyById(partyId).contact)
   const [editContact, setEditContact] = useState(false)
   // Destination banking, editable before firing so we always know where money lands.
-  const [bank, setBank] = useState({ account: 'Black Coyote LLC', last4: '6712', routing: '021000021' })
+  const [bank, setBank] = useState({ account: partyById(partyId).name + ' LLC', last4: '6712', routing: '021000021' })
   const [editBank, setEditBank] = useState(false)
 
   const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
@@ -105,8 +104,8 @@ export default function Settlement() {
   const signed = (c: CustomLine) => (c.dir === 'add' ? customAmt(c) : -customAmt(c))
   const customTotal = customs.reduce((a, c) => a + signed(c), 0)
   const adjGross = GROSS - taxAmt - ccAmt - concAmt + customTotal
-  const dueArtist = adjGross * (cfg.defaultSplit.vendor / 100)
-  const venueCut = adjGross * (cfg.defaultSplit.venue / 100)
+  const dueArtist = adjGross * (party.splitPct / 100)
+  const venueCut = adjGross * ((100 - party.splitPct) / 100)
   const dueVenue = venueCut + taxAmt
   const methodNote = method === 'Check' ? 'mailed within 7 days' : 'lands next business day'
 
@@ -138,7 +137,7 @@ export default function Settlement() {
           titleSize={20}
           subtitle={
             <>
-              Black Coyote · Saturday, May 16, 2026 · All Booths · Split 80 / 20 <span style={{ color: '#bbbbbb' }}>·</span> locked at advance
+              {party.name} · {party.category} · {party.location} · Split {party.splitPct} / {100 - party.splitPct} <span style={{ color: '#bbbbbb' }}>·</span> locked at advance
             </>
           }
           actions={
@@ -318,7 +317,7 @@ export default function Settlement() {
                   <div style={{ border: '1px solid #eeeeee', borderRadius: 6, padding: '4px 16px', marginBottom: 14, fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Gross sales</span><b>{money2(GROSS)}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Adjusted gross</span><b>{money2(adjGross)}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Due to vendor (80% split, locked)</span><b style={{ color: t.red }}>{money2(dueArtist)}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Due to vendor ({party.splitPct}% split, locked)</span><b style={{ color: t.red }}>{money2(dueArtist)}</b></div>
                   </div>
                   {/* Settlement contact — pre-populated from the vendor object, editable here */}
                   <div style={{ border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '12px 16px', marginBottom: 14, background: t.rowBg }}>
@@ -400,10 +399,10 @@ export default function Settlement() {
             {step === 'payout' && (
               <>
                 <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '20px 22px' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: t.heading, marginBottom: 14 }}>Send payout to Black Coyote</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: t.heading, marginBottom: 14 }}>Send payout to {party.name}</div>
                   <div style={{ border: '1px solid #eeeeee', borderRadius: 6, padding: '4px 16px', marginBottom: 14, fontSize: 13 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Adjusted gross</span><b>{money2(adjGross)}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Vendor split (80%, locked)</span><b>{money2(dueArtist)}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #f3f3f3' }}><span style={{ color: '#666666' }}>Vendor split ({party.splitPct}%, locked)</span><b>{money2(dueArtist)}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0' }}><span style={{ color: '#666666' }}>Venue collected via Ronin POS</span><span style={{ color: t.body2 }}>{money2(GROSS)} — venue owes vendor</span></div>
                   </div>
                   {/* Destination — editable so we always know where the money lands before firing */}
@@ -475,8 +474,8 @@ export default function Settlement() {
                   <div style={{ fontSize: 11.5, color: t.muted2, marginBottom: 10 }}>All revenue lands in the general merch bucket, then settles out.</div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     {[
-                      { l: 'ARTIST / VENDOR', v: money2(dueArtist), note: `${cfg.defaultSplit.vendor}% split`, accent: true },
-                      { l: 'FESTIVAL', v: money2(dueVenue), note: `${cfg.defaultSplit.venue}% cut + tax retained` },
+                      { l: party.kind === 'artist' ? 'ARTIST' : 'VENDOR', v: money2(dueArtist), note: `${party.splitPct}% split`, accent: true },
+                      { l: 'FESTIVAL', v: money2(dueVenue), note: `${100 - party.splitPct}% cut + tax retained` },
                       { l: 'VENDOR MANAGER', v: money2(0), note: 'net after settle-out' },
                     ].map((b) => (
                       <div key={b.l} style={{ flex: 1, border: `1px solid ${t.cardBorder}`, borderLeft: b.accent ? `3px solid ${t.red}` : `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '10px 12px' }}>
@@ -502,12 +501,12 @@ export default function Settlement() {
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderLeft: `3px solid ${t.red}`, borderRadius: 6, padding: '14px 16px' }}>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>DUE VENDOR</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: t.heading, margin: '3px 0 2px' }}>{money2(dueArtist)}</div>
-              <div style={{ fontSize: 11.5, color: t.muted }}>80% of adjusted gross · split locked at advance</div>
+              <div style={{ fontSize: 11.5, color: t.muted }}>{party.splitPct}% of adjusted gross · split locked at advance</div>
             </div>
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '14px 16px' }}>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>DUE VENUE</div>
               <div style={{ fontSize: 20, fontWeight: 800, color: t.heading, margin: '3px 0 2px' }}>{money2(dueVenue)}</div>
-              <div style={{ fontSize: 11.5, color: t.muted }}>20% cut {money2(venueCut)} + tax retained {money2(taxAmt)}</div>
+              <div style={{ fontSize: 11.5, color: t.muted }}>{100 - party.splitPct}% cut {money2(venueCut)} + tax retained {money2(taxAmt)}</div>
             </div>
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '14px 16px', fontSize: 12, color: t.secondary, lineHeight: 1.5 }}>
               <b style={{ color: t.heading }}>Venue collected {money(GROSS)}</b> via Ronin POS — funds are already in the system, so the venue owes the vendor. No check to follow.

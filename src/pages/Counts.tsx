@@ -8,6 +8,7 @@ import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
 import { useCounts, type Item, type Sku } from '../lib/counts'
 import { parties, partyById, type PartyKind } from '../lib/parties'
+import { kindConfig, isConsumable, attributeFor } from '../lib/catalog'
 import { useSignOff } from '../lib/signoff'
 
 const th: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: t.muted, borderBottom: '1px solid #eeeeee' }
@@ -87,7 +88,7 @@ function PartyRail({
           )
         })}
         <div style={{ border: `1.5px dashed ${t.faint2}`, borderRadius: 6, padding: '8px 10px', fontSize: 12, color: t.muted, textAlign: 'center', marginTop: 4, cursor: 'pointer' }}>
-          + Add {kind === 'artist' ? 'Artist' : 'Vendor'}
+          + {kindConfig[kind].addLabel.replace('Add ', '')}
         </div>
       </div>
     </div>
@@ -96,14 +97,19 @@ function PartyRail({
 
 export default function Counts() {
   const nav = useNavigate()
-  const { items, skus, calc, setSku, addReup, skusForItem, reupsForItem, reups, totals, flagged, locked, setLocked } = useCounts()
+  const { items, skus, calc, setSku, skusForItem, reups, totals, flagged, locked, setLocked, partyId, setPartyId } = useCounts()
   const signoff = useSignOff()
 
-  const [kind, setKind] = useState<PartyKind>('artist')
-  const [activeId, setActiveId] = useState('black-coyote')
-  const party = partyById(activeId)
+  const party = partyById(partyId)
+  const kind = party.kind
+  const cfgK = kindConfig[kind]
+  const setKind = (k: PartyKind) => {
+    const first = parties.find((p) => p.kind === k)
+    if (first) setPartyId(first.id)
+  }
 
-  const [open, setOpen] = useState<Record<string, boolean>>({ tee: true, hoodie: true })
+  // Collapsed state is per item; anything not explicitly collapsed starts open.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [addItemOpen, setAddItemOpen] = useState(false)
   const [detailItem, setDetailItem] = useState<Item | null>(null)
   const [reupFor, setReupFor] = useState<Item | null>(null)
@@ -115,9 +121,7 @@ export default function Counts() {
 
   const num = (v: string) => (v === '' || isNaN(Number(v)) ? 0 : Number(v))
   const ro = locked || finalized
-
-  // Only Black Coyote has seeded SKU data in this prototype; other parties show an empty state.
-  const hasData = activeId === 'black-coyote'
+  const hasData = items.length > 0
 
   const renderSkuRow = (s: Sku, item: Item) => {
     const c = calc(s)
@@ -178,10 +182,10 @@ export default function Counts() {
   const colCount = showMargin ? 13 : 12
 
   return (
-    <AdminLayout active="Counts (In/Out)" rail={<PartyRail kind={kind} setKind={setKind} activeId={activeId} setActiveId={setActiveId} />}>
+    <AdminLayout active="Counts (In/Out)" rail={<PartyRail kind={kind} setKind={setKind} activeId={partyId} setActiveId={setPartyId} />}>
       <main style={{ flex: 1, minWidth: 0, padding: '20px 24px 32px' }}>
         <PageHead
-          title={`Furnace Fest 2026 — ${kind === 'artist' ? 'Artist' : 'Vendor'} Counts`}
+          title={`Furnace Fest 2026 — ${cfgK.countsTitle}`}
           subtitle={
             <>
               {party.name} · {party.category} · {party.location}
@@ -233,17 +237,17 @@ export default function Counts() {
                   <input type="checkbox" checked={showMargin} onChange={(e) => setShowMargin(e.target.checked)} style={{ verticalAlign: -2 }} /> show margin
                 </label>
               </div>
-              <EditLegend text="editable · Comp = giveaways · Shrink = damage / lost" />
+              <EditLegend text={`editable · ${cfgK.compHint} · ${cfgK.shrinkHint}`} />
             </div>
 
             {/* Counts grid */}
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1080 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 950 }}>
                 <thead>
                   <tr>
                     <th style={{ ...th, textAlign: 'left', padding: '10px 14px', letterSpacing: '.04em' }}>ITEM</th>
                     <th style={{ ...th, textAlign: 'left', padding: '10px 8px' }}>VARIANT</th>
-                    {['PRICE', 'INITIAL COUNT', 'RE-UPS', 'TOTAL IN', 'COMP', 'SHRINK', 'ENDING COUNT', 'SOLD', 'VARIANCE'].map((h) => (
+                    {['PRICE', 'INITIAL COUNT', 'RE-UPS', 'TOTAL IN', cfgK.compLabel, cfgK.shrinkLabel, 'ENDING COUNT', 'SOLD', 'VARIANCE'].map((h) => (
                       <th key={h} style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>{h}</th>
                     ))}
                     {showMargin && <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>MARGIN</th>}
@@ -253,13 +257,13 @@ export default function Counts() {
                 <tbody>
                   {items.map((item) => {
                     const it = itemTotals(item.id)
-                    const isOpen = open[item.id] ?? false
+                    const isOpen = !collapsed[item.id]
                     return (
                       <>
                         <tr key={item.id} style={{ background: t.rowBg }}>
                           <td colSpan={colCount} style={{ padding: '9px 14px', borderBottom: `1px solid ${t.divider}` }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span onClick={() => setOpen((o) => ({ ...o, [item.id]: !isOpen }))} style={{ color: '#666666', fontSize: 10, cursor: 'pointer' }}>{isOpen ? '▼' : '▶'}</span>
+                              <span onClick={() => setCollapsed((o) => ({ ...o, [item.id]: isOpen }))} style={{ color: '#666666', fontSize: 10, cursor: 'pointer' }}>{isOpen ? '▼' : '▶'}</span>
                               <div style={{ width: 30, height: 30, background: '#efefef', border: '1px solid #e2e2e2', borderRadius: 4 }} />
                               {/* Item name opens the detail drawer */}
                               <b
@@ -268,7 +272,11 @@ export default function Counts() {
                               >
                                 {item.name}
                               </b>
-                              <span style={{ fontSize: 11, color: t.muted2 }}>{item.category} · {skusForItem(item.id).length} variants</span>
+                              <span style={{ fontSize: 11, color: t.muted2 }}>
+                                {item.category} · {skusForItem(item.id).length} {attributeFor[item.category].noun}
+                                {skusForItem(item.id).length === 1 ? '' : 's'}
+                                {isConsumable(item.category) && <span style={{ color: t.faint }}> · consumable</span>}
+                              </span>
                               <div style={{ flex: 1 }} />
                               <span style={{ fontSize: 11, color: it.variance === 0 ? t.greenText2 : t.red, fontWeight: 700 }}>
                                 {it.variance === 0 ? '✓ reconciles' : `${varLabel(it.variance)} variance`}
@@ -310,7 +318,7 @@ export default function Counts() {
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, marginTop: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderBottom: `1px solid ${t.divider}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: t.heading }}>
-                  Inventory re-up log <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11.5, marginLeft: 6 }}>every restock is timestamped and rolls into the count total</span>
+                  Inventory re-up log <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11.5, marginLeft: 6 }}>{cfgK.reupHint} — timestamped, rolls into the count total</span>
                 </div>
                 <span style={{ fontSize: 11.5, color: t.muted2 }}>{reups.length} re-ups · +{reups.reduce((a, r) => a + r.qty, 0)} units</span>
               </div>
@@ -425,7 +433,7 @@ export default function Counts() {
           </>
         }
       >
-        <ItemBuilderForm />
+        <ItemBuilderForm kind={kind} />
       </Drawer>
 
       {/* Re-up */}
@@ -553,9 +561,15 @@ function ItemDetail({ item }: { item: Item }) {
         )}
       </div>
 
-      <div style={{ fontSize: 11.5, color: t.muted2, lineHeight: 1.5 }}>
-        Estimated return shipment weight for unsold stock: <b style={{ color: t.body2 }}>{tot.weight.toFixed(1)} lb</b> ({tot.ending} units) — feeds the label generator.
-      </div>
+      {isConsumable(item.category) ? (
+        <div style={{ fontSize: 11.5, color: t.muted2, lineHeight: 1.5 }}>
+          Consumable — nothing ships back. {tot.ending} units left at close are written off as waste, not returned stock.
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: t.muted2, lineHeight: 1.5 }}>
+          Estimated return shipment weight for unsold stock: <b style={{ color: t.body2 }}>{tot.weight.toFixed(1)} lb</b> ({tot.ending} units) — feeds the label generator.
+        </div>
+      )}
     </div>
   )
 }
