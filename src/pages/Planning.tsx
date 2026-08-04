@@ -114,7 +114,7 @@ export default function Planning() {
     <AdminLayout active="Merch Planning">
       <main style={{ padding: '20px 24px 32px' }}>
         <PageHead
-          title="Spring Music Fest 2026 — Merch Planning"
+          title="Furnace Fest 2026 — Merch Planning"
           subtitle="Festival merch program · Build Sheet + Revenue Projection"
           actions={
             <>

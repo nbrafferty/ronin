@@ -154,7 +154,7 @@ export function TopBar() {
           justifyContent: 'space-between',
         }}
       >
-        Spring Music Fest 2026 <span style={{ color: t.muted2 }}>▾</span>
+        Furnace Fest 2026 <span style={{ color: t.muted2 }}>▾</span>
       </div>
       <div style={{ flex: 1 }} />
       <RoleSwitcher />

@@ -4,7 +4,7 @@
  * In the .NET build these live on the event/vendor contract; settlement reads them read-only.
  */
 export const eventConfig = {
-  event: 'Spring Music Fest 2026',
+  event: 'Furnace Fest 2026',
   date: 'Saturday, May 16, 2026',
   attendance: 25000,
   fees: {
@@ -18,4 +18,14 @@ export const eventConfig = {
   lockedAt: 'May 2, 2026',
 } as const
 
-export type CustomDeduction = { id: number; label: string; mode: '%' | '$'; value: number; basis: string }
+/**
+ * A custom settlement line. `dir` lets the same row either deduct from or add to the payout —
+ * deposit returns and product buybacks are additions, shipping and staff are deductions.
+ */
+export type CustomLine = {
+  id: number
+  label: string
+  mode: '%' | '$'
+  value: number
+  dir: 'deduct' | 'add'
+}

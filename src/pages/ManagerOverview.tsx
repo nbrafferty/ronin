@@ -63,7 +63,7 @@ export default function ManagerOverview() {
     <AdminLayout active="Overview" showOverview>
       <main style={{ padding: '20px 24px 32px' }}>
         <PageHead
-          title={role === 'organizer' ? 'Spring Music Fest 2026 — All Vendors' : 'Spring Music Fest 2026 — Your Vendors'}
+          title={role === 'organizer' ? 'Furnace Fest 2026 — All Vendors' : 'Furnace Fest 2026 — Your Vendors'}
           subtitle="Saturday, May 16, 2026 · All Booths ▾ · every vendor, all merch data, one page"
           actions={
             <>
