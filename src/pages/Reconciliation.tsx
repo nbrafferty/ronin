@@ -2,128 +2,412 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminLayout } from '../components/AdminLayout'
 import { Btn, PageHead } from '../components/ui'
+import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
+import { useCounts, type Sku } from '../lib/counts'
+import { partyById } from '../lib/parties'
+import { kindConfig } from '../lib/catalog'
 
-type Kind = 'variance' | 'shrink'
-interface Flag {
-  id: number
-  item: string
-  variant: string
-  kind: Kind
-  units: number
-  price: number
-  /** the two binary resolutions; `deduct` reduces the vendor payout by the item value */
-  options: [{ label: string; deduct: boolean }, { label: string; deduct: boolean }]
-}
+const money2 = (n: number) => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const th: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: t.muted, borderBottom: '1px solid #eeeeee', letterSpacing: '.03em' }
+const varLabel = (v: number) => (v === 0 ? '0' : (v > 0 ? '+' : '−') + Math.abs(v))
+const varColor = (v: number) => (v === 0 ? t.greenText2 : t.red)
 
-const flags: Flag[] = [
-  { id: 1, item: 'Black Logo Tee', variant: 'M', kind: 'variance', units: 3, price: 40, options: [{ label: 'Charge vendor', deduct: true }, { label: 'Recount / waive', deduct: false }] },
-  { id: 2, item: 'Black Logo Tee', variant: 'L', kind: 'shrink', units: 2, price: 40, options: [{ label: 'Deduct from payout', deduct: true }, { label: 'Festival absorbs', deduct: false }] },
-  { id: 3, item: 'Circle Logo Hoodie', variant: 'L', kind: 'variance', units: 1, price: 60, options: [{ label: 'Charge vendor', deduct: true }, { label: 'Recount / waive', deduct: false }] },
-  { id: 4, item: 'Red/White Trucker Hat', variant: 'OS', kind: 'shrink', units: 1, price: 18, options: [{ label: 'Deduct from payout', deduct: true }, { label: 'Festival absorbs', deduct: false }] },
+/**
+ * How a SKU-level variance gets resolved.
+ *
+ * Every lever declares which of the two sold columns it moves, so picking one visibly
+ * closes the variance on that side:
+ *   - `pos`     — the POS was wrong; snap POS SOLD to the physical count.
+ *   - `counted` — the shelf was wrong; move COUNTED SOLD to the POS via waste or a count fix.
+ *   - `null`    — both counts stand as recorded; only money moves (or nothing does).
+ */
+type Resolution = 'pos-error' | 'count-fix' | 'charge' | 'waive'
+type Affects = 'pos' | 'counted' | null
+
+const levers: { id: Resolution; label: string; hint: string; affects: Affects; movesMoney: boolean }[] = [
+  {
+    id: 'pos-error',
+    label: 'POS mis-ring',
+    hint: 'Trust the shelf — a wrong size was rung up. Corrects POS Sold to the counted figure.',
+    affects: 'pos',
+    movesMoney: false,
+  },
+  {
+    id: 'count-fix',
+    label: 'Damage / miscount',
+    hint: 'Trust the POS — the missing units were never sold. Corrects Counted Sold.',
+    affects: 'counted',
+    movesMoney: false,
+  },
+  {
+    id: 'charge',
+    label: 'Charge vendor',
+    hint: 'Counts stand as recorded — the vendor eats the missing stock at retail.',
+    affects: null,
+    movesMoney: true,
+  },
+  {
+    id: 'waive',
+    label: 'Festival absorbs',
+    hint: 'Counts stand as recorded — no adjustment to the payout.',
+    affects: null,
+    movesMoney: false,
+  },
 ]
+const leverById = (id: Resolution) => levers.find((l) => l.id === id)!
 
-const BASE_PAYOUT = 7905.91
-const kindBadge: Record<Kind, { label: string; bg: string; color: string; border: string }> = {
-  variance: { label: 'Variance', bg: '#fdf6ec', color: '#8a5d12', border: '#f0dcae' },
-  shrink: { label: 'Damage / shrink', bg: '#fdecea', color: t.red, border: t.redTintBorder },
-}
+/** The SKU fields a resolution can move, snapshotted so a lever can be undone. */
+interface Snapshot { posSold: number; shrink: number; ending: number }
+const snap = (s: Sku): Snapshot => ({ posSold: s.posSold, shrink: s.shrink, ending: s.ending })
 
 export default function Reconciliation() {
   const nav = useNavigate()
-  // resolution per flag: undefined = unresolved, 0/1 = chosen option index
-  const [res, setRes] = useState<Record<number, 0 | 1 | undefined>>({})
+  const { items, skus, calc, setSku, totals, flagged, partyId } = useCounts()
+  const party = partyById(partyId)
+  const cfgK = kindConfig[party.kind]
 
-  const { deductions, resolvedCount } = useMemo(() => {
-    let deductions = 0
-    let resolvedCount = 0
-    for (const f of flags) {
-      const choice = res[f.id]
-      if (choice === undefined) continue
-      resolvedCount++
-      if (f.options[choice].deduct) deductions += f.units * f.price
+  const [view, setView] = useState<'sku' | 'overall'>('sku')
+  const [onlyFlagged, setOnlyFlagged] = useState(true)
+  const [res, setRes] = useState<Record<string, Resolution | undefined>>({})
+  /** Pre-resolution values, so a lever can be switched or undone. */
+  const [orig, setOrig] = useState<Record<string, Snapshot>>({})
+  const [routeOpen, setRouteOpen] = useState(false)
+
+  // Resolved rows stay visible so the correction it made is auditable.
+  const visible = onlyFlagged ? skus.filter((s) => calc(s).variance !== 0 || res[s.id]) : skus
+
+  /** The row's numbers as they stood before any resolution was applied. */
+  const baseCalc = (s: Sku) => (orig[s.id] ? calc({ ...s, ...orig[s.id] }) : calc(s))
+
+  // Charges are the only lever that moves money; everything else is bookkeeping.
+  const charges = useMemo(() => {
+    let sum = 0
+    for (const s of skus) {
+      if (res[s.id] === 'charge') sum += Math.abs(baseCalc(s).varianceValue)
     }
-    return { deductions, resolvedCount }
-  }, [res])
+    return sum
+  }, [res, skus, orig])
 
-  const adjusted = BASE_PAYOUT - deductions
-  const allResolved = resolvedCount === flags.length
+  const resolvedCount = Object.values(res).filter(Boolean).length
+  // Still disagreeing and untouched.
+  const openCount = skus.filter((s) => calc(s).variance !== 0 && !res[s.id]).length
+  const allResolved = resolvedCount > 0 && openCount === 0
+  // Settlement basis: physical counts, plus anything charged back to the vendor.
+  const settlementGross = totals.physicalGross + charges
+
+  /**
+   * Apply a lever. Each one moves exactly one of the two sold columns (or neither),
+   * always computed from the row's original state so switching levers is clean.
+   */
+  const applyLever = (s: Sku, lever: Resolution) => {
+    const base = orig[s.id] ?? snap(s)
+    if (!orig[s.id]) setOrig((o) => ({ ...o, [s.id]: base }))
+    const c = calc({ ...s, ...base })
+
+    setRes((r) => ({ ...r, [s.id]: lever }))
+
+    if (lever === 'pos-error') {
+      // Trust the shelf → POS SOLD moves to the counted figure.
+      setSku(s.id, { ...base, posSold: c.physicalSold })
+    } else if (lever === 'count-fix') {
+      // Trust the POS → COUNTED SOLD moves to the rung figure.
+      if (c.variance < 0) {
+        // Shelf says more sold than the POS rang: the difference was lost, not sold.
+        setSku(s.id, { ...base, shrink: base.shrink + Math.abs(c.variance) })
+      } else {
+        // POS rang more than the shelf supports: the ending count was overstated.
+        setSku(s.id, { ...base, ending: Math.max(0, base.ending - c.variance) })
+      }
+    } else {
+      // Charge / absorb leave both counts exactly as recorded.
+      setSku(s.id, base)
+    }
+  }
+
+  /** Undo a resolution and restore the row's original counts. */
+  const clearLever = (s: Sku) => {
+    if (orig[s.id]) setSku(s.id, orig[s.id])
+    setRes((r) => ({ ...r, [s.id]: undefined }))
+  }
+
+  const itemName = (id: string) => items.find((i) => i.id === id)?.name ?? id
 
   return (
     <AdminLayout active="Reconciliation">
-      <main style={{ padding: '20px 24px 32px', maxWidth: 1120 }}>
+      <main style={{ padding: '20px 24px 32px' }}>
         <PageHead
-          title="Reconciliation — Black Coyote"
-          subtitle="Spring Music Fest 2026 · resolve variances and damages · payout updates in real time"
-          actions={<Btn onClick={() => nav('/settlement')} variant="primary">Continue to Settlement →</Btn>}
+          title={`Reconciliation — ${party.name}`}
+          subtitle={`Furnace Fest 2026 · ${party.category} · physical counts are the source of truth`}
+          actions={
+            <>
+              <Btn onClick={() => setRouteOpen(true)}>Route sign-off →</Btn>
+              <Btn variant="primary" onClick={() => nav('/settlement')}>Continue to Settlement →</Btn>
+            </>
+          }
         />
 
-        <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-          {/* Flags */}
-          <div style={{ flex: 1, minWidth: 0, background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: `1px solid ${t.divider}` }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: t.heading }}>Flagged items <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11.5, marginLeft: 6 }}>{resolvedCount} of {flags.length} resolved</span></div>
-              <div style={{ fontSize: 11, color: t.muted2 }}>pick one option per row</div>
-            </div>
-            {flags.map((f, i) => {
-              const badge = kindBadge[f.kind]
-              const choice = res[f.id]
-              const value = f.units * f.price
+        {/* View switch */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div style={{ display: 'flex', border: `1.5px solid ${t.inputBorder}`, borderRadius: 5, overflow: 'hidden' }}>
+            {(['sku', 'overall'] as const).map((v, i) => {
+              const on = view === v
               return (
-                <div key={f.id} style={{ padding: '14px 18px', borderBottom: i < flags.length - 1 ? `1px solid ${t.divider3}` : 'none', background: choice === undefined ? undefined : '#fcfdfc' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: t.heading }}>{f.item}</span>
-                      <span style={{ fontSize: 12, color: t.muted2 }}> · {f.variant}</span>
-                      <span style={{ display: 'inline-block', marginLeft: 8, fontSize: 10.5, fontWeight: 700, background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, borderRadius: 999, padding: '1px 8px' }}>{badge.label}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: t.secondary }}>{f.units} unit{f.units === 1 ? '' : 's'} · {money(value)}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    {f.options.map((o, oi) => {
-                      const on = choice === oi
-                      return (
-                        <button
-                          key={oi}
-                          onClick={() => setRes((r) => ({ ...r, [f.id]: on ? undefined : (oi as 0 | 1) }))}
-                          style={{
-                            fontFamily: 'inherit', fontSize: 12, fontWeight: 700, padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
-                            border: `1.5px solid ${on ? (o.deduct ? t.red : t.greenText2) : t.inputBorder}`,
-                            color: on ? (o.deduct ? t.red : t.greenText) : t.secondary2,
-                            background: on ? (o.deduct ? t.redTintBg : t.greenBg) : '#fff',
-                          }}
-                        >
-                          {on ? '● ' : ''}{o.label}{o.deduct ? ` (−${money(value)})` : ''}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  style={{ fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, padding: '5px 16px', border: 'none', borderLeft: i ? `1.5px solid ${t.inputBorder}` : undefined, cursor: 'pointer', color: on ? t.red : t.secondary2, background: on ? t.redTintBg : '#fff' }}
+                >
+                  {v === 'sku' ? 'SKU level' : 'Overall'}
+                </button>
               )
             })}
           </div>
+          {view === 'sku' && (
+            <label style={{ fontSize: 12, color: t.secondary, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} />
+              only flagged SKUs ({openCount} open)
+            </label>
+          )}
+          <div style={{ flex: 1 }} />
+          <div style={{ fontSize: 11.5, color: t.muted2 }}>
+            SKU-level errors can cancel out at the top line — check both views.
+          </div>
+        </div>
 
-          {/* Live payout adjustment */}
-          <div style={{ width: 280, flex: 'none', display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 20 }}>
+        {view === 'sku' && (
+          <div style={{ fontSize: 11.5, color: t.secondary, background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '9px 14px', marginBottom: 12, lineHeight: 1.5 }}>
+            <b style={{ color: t.heading }}>Each resolution corrects one column.</b>{' '}
+            <b style={{ color: t.greenText }}>POS mis-ring</b> trusts the shelf and moves <b>POS Sold</b>;{' '}
+            <b style={{ color: t.greenText }}>{cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : 'Damage / miscount'}</b> trusts the POS and moves <b>Counted Sold</b>;{' '}
+            <b style={{ color: t.red }}>Charge vendor</b> and <b>Festival absorbs</b> leave both counts as recorded. Neither column is typed into directly — corrections come from the resolution, and corrected cells show what they were.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {view === 'sku' ? (
+              <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...th, textAlign: 'left', padding: '10px 14px' }}>ITEM / SKU</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>PRICE</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>INITIAL COUNT</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>RE-UPS</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>ENDING COUNT</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>COUNTED SOLD</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>POS SOLD</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>VARIANCE</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 14px' }}>$ VARIANCE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((s) => {
+                      const c = calc(s)
+                      const chosen = res[s.id]
+                      const hasLevers = c.variance !== 0 || !!chosen
+                      const affects = chosen ? leverById(chosen).affects : null
+                      const before = baseCalc(s)
+                      // Which column this row's resolution moved, and what it was before.
+                      const countedMoved = affects === 'counted' && before.physicalSold !== c.physicalSold
+                      const posMoved = affects === 'pos' && (orig[s.id]?.posSold ?? s.posSold) !== s.posSold
+                      const mainRow = (
+                        <tr key={s.id} style={{ background: chosen ? '#fcfdfc' : undefined }}>
+                          <td style={{ padding: '9px 14px', borderBottom: `1px solid ${t.divider3}` }}>
+                            <b style={{ color: t.heading }}>{itemName(s.itemId)}</b>
+                            <span style={{ color: t.muted2 }}> · {s.variant}</span>
+                          </td>
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{money(s.price, 2)}</td>
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{s.initial}</td>
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: c.added ? t.greenText2 : t.faint }}>{c.added ? `+${c.added}` : '—'}</td>
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{s.ending}</td>
+
+                          {/* COUNTED SOLD — moved by the "damage / miscount" lever */}
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: countedMoved ? t.greenBg : undefined }}>
+                            <div style={{ fontWeight: 700, color: countedMoved ? t.greenText : t.heading }}>{c.physicalSold}</div>
+                            {countedMoved && <WasNote from={before.physicalSold} />}
+                          </td>
+
+                          {/* POS SOLD — read-only; only a resolution can move it */}
+                          <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: posMoved ? t.greenBg : undefined }}>
+                            <div style={{ fontWeight: 700, color: posMoved ? t.greenText : t.heading }}>{s.posSold}</div>
+                            {posMoved && <WasNote from={orig[s.id]!.posSold} />}
+                          </td>
+                          <td style={{ padding: '9px 8px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700, color: varColor(c.variance) }}>{varLabel(c.variance)}</td>
+                          <td style={{ padding: '9px 14px', borderBottom: hasLevers ? 'none' : `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 600, color: varColor(c.variance) }}>
+                            {c.variance === 0 ? <span style={{ color: t.greenText2, fontSize: 11 }}>✓ reconciles</span> : money2(c.varianceValue)}
+                          </td>
+                        </tr>
+                      )
+                      // Resolution levers get their own full-width row so nothing scrolls out of view.
+                      const leverRow = hasLevers ? (
+                        <tr key={s.id + '-res'} style={{ background: chosen ? '#fcfdfc' : undefined }}>
+                          <td colSpan={9} style={{ padding: '0 14px 10px', borderBottom: `1px solid ${t.divider3}` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 10.5, fontWeight: 700, color: t.muted, letterSpacing: '.03em' }}>RESOLVE:</span>
+                              {levers.map((l) => {
+                                const on = chosen === l.id
+                                // Label the column this lever moves, so the effect is obvious before clicking.
+                                const target = l.affects === 'pos' ? '→ POS Sold' : l.affects === 'counted' ? '→ Counted Sold' : null
+                                const label = l.id === 'count-fix' && cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : l.label
+                                return (
+                                  <button
+                                    key={l.id}
+                                    title={l.hint}
+                                    onClick={() => (on ? clearLever(s) : applyLever(s, l.id))}
+                                    style={{
+                                      fontFamily: 'inherit', fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 999, cursor: 'pointer',
+                                      border: `1.5px solid ${on ? (l.movesMoney ? t.red : t.greenText2) : t.inputBorder}`,
+                                      color: on ? (l.movesMoney ? t.red : t.greenText) : t.secondary2,
+                                      background: on ? (l.movesMoney ? t.redTintBg : t.greenBg) : '#fff',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {on ? '● ' : ''}{label}
+                                    {target && <span style={{ fontWeight: 600, opacity: on ? 0.85 : 0.6 }}> {target}</span>}
+                                    {l.movesMoney && <span style={{ fontWeight: 600 }}> ({money2(Math.abs(before.varianceValue))})</span>}
+                                  </button>
+                                )
+                              })}
+                              <span style={{ fontSize: 11, color: chosen ? t.greenText : t.muted2, marginLeft: 4 }}>
+                                {chosen ? leverById(chosen).hint : 'pick one — each corrects a different column'}
+                              </span>
+                              {chosen && (
+                                <button
+                                  onClick={() => clearLever(s)}
+                                  style={{ fontFamily: 'inherit', fontSize: 11, fontWeight: 600, color: t.muted2, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                                >
+                                  undo
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null
+                      return [mainRow, leverRow]
+                    })}
+                    {visible.length === 0 && (
+                      <tr>
+                        <td colSpan={9} style={{ padding: '26px 14px', textAlign: 'center', fontSize: 13, color: t.greenText }}>
+                          ✓ Every SKU reconciles — the POS matches the physical count.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* Overall view — the top-line rollup, where offsetting SKU errors wash out */
+              <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.divider}`, fontSize: 14, fontWeight: 700, color: t.heading }}>
+                  Overall variance
+                  <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11.5, marginLeft: 8 }}>whole-show rollup</span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <tbody>
+                    {[
+                      ['Initial count', `${totals.initial} units`, null],
+                      ['Re-ups logged', `+${totals.added} units`, null],
+                      ['Total counted in', `${totals.totalIn} units`, null],
+                      ['Comps', `${totals.comp} units`, null],
+                      [cfgK.shrinkLabel === 'WASTE' ? 'Waste (spoilage / breakage)' : 'Shrink (damage / lost)', `${totals.shrink} units`, null],
+                      ['Ending count', `${totals.ending} units`, null],
+                    ].map(([l, v]) => (
+                      <tr key={l as string}>
+                        <td style={{ padding: '10px 18px', borderBottom: `1px solid ${t.divider3}`, color: t.secondary }}>{l}</td>
+                        <td style={{ padding: '10px 18px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 600 }}>{v}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider3}`, color: t.heading, fontWeight: 700 }}>Sold by physical count</td>
+                      <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700 }}>{totals.physicalSold} units · {money(totals.physicalGross, 2)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider3}`, color: t.heading, fontWeight: 700 }}>Sold per POS</td>
+                      <td style={{ padding: '11px 18px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', fontWeight: 700 }}>{totals.posSold} units · {money(totals.posGross, 2)}</td>
+                    </tr>
+                    <tr style={{ background: t.rowBg }}>
+                      <td style={{ padding: '13px 18px', color: t.heading, fontWeight: 700 }}>Net variance</td>
+                      <td style={{ padding: '13px 18px', textAlign: 'right', fontWeight: 800, fontSize: 14, color: varColor(totals.varianceUnits) }}>
+                        {varLabel(totals.varianceUnits)} units · {money2(totals.varianceValue)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style={{ padding: '12px 18px', background: '#fdf6ec', borderTop: `1px solid ${t.divider}`, fontSize: 12, color: '#8a5d12', lineHeight: 1.55 }}>
+                  <b>Why both views matter.</b> The net figure above is only {money2(totals.varianceValue)}, but{' '}
+                  <b>{money(totals.grossVarianceValue, 2)}</b> of SKU-level error is hiding inside it — an XL rung up as an M nets to zero
+                  here while both SKUs are wrong. {flagged.length} SKU{flagged.length === 1 ? '' : 's'} still need a decision.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Dollar summary rail — money follows the counts */}
+          <div style={{ width: 290, flex: 'none', display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 20 }}>
             <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderLeft: `3px solid ${t.red}`, borderRadius: 6, padding: '16px 18px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>ADJUSTED PAYOUT</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: t.heading, margin: '4px 0 10px' }}>${adjusted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '6px 0', borderTop: `1px solid ${t.divider3}` }}>
-                <span style={{ color: '#666666' }}>Base due vendor</span><b>{money(BASE_PAYOUT, 2)}</b>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '6px 0' }}>
-                <span style={{ color: '#666666' }}>Reconciliation deductions</span>
-                <b style={{ color: deductions ? t.red : t.muted2 }}>{deductions ? '−' + money(deductions, 2) : '$0.00'}</b>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2 }}>GROSS SALES · BY COUNT</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: t.heading, margin: '4px 0 10px' }}>{money(settlementGross, 2)}</div>
+              <Row label="Counted in" v={`${totals.totalIn} units`} />
+              <Row label="Counted out (ending)" v={`${totals.ending} units`} />
+              <Row label="Sold by count" v={`${totals.physicalSold} units`} strong />
+              <Row label="Gross by count" v={money(totals.physicalGross, 2)} strong />
+              <Row label="Gross per POS" v={money(totals.posGross, 2)} muted />
+              <div style={{ borderTop: `1px solid ${t.divider3}`, marginTop: 6, paddingTop: 6 }}>
+                <Row label="Overall $ variance" v={money2(totals.varianceValue)} color={varColor(totals.varianceUnits)} strong />
+                <Row label="SKU-level $ error" v={money(totals.grossVarianceValue, 2)} color={totals.grossVarianceValue ? '#8a5d12' : t.greenText2} />
+                <Row label="Charged to vendor" v={charges ? '+' + money(charges, 2) : '$0.00'} color={charges ? t.red : t.muted2} />
               </div>
             </div>
-            <div style={{ background: allResolved ? t.greenBg : '#fdf6ec', border: `1px solid ${allResolved ? t.greenBorder : '#f0dcae'}`, borderRadius: 6, padding: '12px 14px', fontSize: 12, color: allResolved ? t.greenText : '#8a5d12', lineHeight: 1.5 }}>
-              {allResolved ? <><b>✓ All items resolved.</b> The adjusted payout carries into settlement.</> : <><b>{flags.length - resolvedCount} item{flags.length - resolvedCount === 1 ? '' : 's'} left.</b> Resolve each variance and damage to lock the payout.</>}
+
+            <div style={{ background: allResolved || flagged.length === 0 ? t.greenBg : '#fdf6ec', border: `1px solid ${allResolved || flagged.length === 0 ? t.greenBorder : '#f0dcae'}`, borderRadius: 6, padding: '12px 14px', fontSize: 12, color: allResolved || flagged.length === 0 ? t.greenText : '#8a5d12', lineHeight: 1.5 }}>
+              {flagged.length === 0 ? (
+                <><b>✓ Fully reconciled.</b> Physical counts and the POS agree. Settlement will use {money(settlementGross, 2)}.</>
+              ) : allResolved ? (
+                <><b>✓ All variances resolved.</b> Settlement basis is {money(settlementGross, 2)} from physical counts.</>
+              ) : (
+                <><b>{openCount} SKU{openCount === 1 ? '' : 's'} unresolved.</b> Pick a resolution on each flagged line — settlement uses the physical count as the basis.</>
+              )}
             </div>
-            <Btn variant="primary" size="lg" onClick={() => nav('/settlement')} style={{ opacity: allResolved ? 1 : 0.6 }}>Continue to Settlement →</Btn>
-            <div style={{ fontSize: 11, color: t.muted2, textAlign: 'center', lineHeight: 1.5 }}>Deductions apply to the vendor's share; “absorbs / waive” leaves the payout unchanged.</div>
+
+            <div style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '12px 14px', fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: t.muted2, marginBottom: 6 }}>SIGN-OFF ROUTING</div>
+              <div style={{ color: t.secondary }}>
+                Default: <b style={{ color: t.heading }}>{party.contact.name}</b> · {party.contact.role}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <Btn size="sm" onClick={() => setRouteOpen(true)}>Route to someone else →</Btn>
+              </div>
+            </div>
+
+            <Btn variant="primary" size="lg" onClick={() => nav('/settlement')}>Continue to Settlement →</Btn>
+            <div style={{ fontSize: 11, color: t.muted2, textAlign: 'center', lineHeight: 1.5 }}>
+              Resolutions recalculate gross sales and flow through settlement and payout.
+            </div>
           </div>
         </div>
       </main>
+
+      <SignOffDrawer stage={routeOpen ? 'settlement' : null} onClose={() => setRouteOpen(false)} party={party} />
     </AdminLayout>
+  )
+}
+
+/** Shows the pre-resolution figure under a corrected cell so the change stays auditable. */
+function WasNote({ from }: { from: number }) {
+  return (
+    <div style={{ fontSize: 10, color: t.greenText2, marginTop: 1, whiteSpace: 'nowrap' }}>
+      was <span style={{ textDecoration: 'line-through' }}>{from}</span>
+    </div>
+  )
+}
+
+function Row({ label, v, strong, muted, color }: { label: string; v: string; strong?: boolean; muted?: boolean; color?: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, padding: '5px 0' }}>
+      <span style={{ color: muted ? t.muted2 : '#666666' }}>{label}</span>
+      <b style={{ color: color ?? (muted ? t.muted2 : t.heading), fontWeight: strong ? 700 : 600 }}>{v}</b>
+    </div>
   )
 }

@@ -18,7 +18,7 @@ export default function SettlementStatement() {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: t.heading }}>Merchandise Settlement Statement</div>
-            <div style={{ fontSize: 12, color: t.secondary2, marginTop: 4 }}>Spring Music Fest 2026 · Statement no. SMF26-0516-BC</div>
+            <div style={{ fontSize: 12, color: t.secondary2, marginTop: 4 }}>Furnace Fest 2026 · Statement no. SMF26-0516-BC</div>
           </div>
         </div>
 
@@ -168,7 +168,7 @@ export default function SettlementStatement() {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ height: 34, borderBottom: '1px solid #111111', display: 'flex', alignItems: 'flex-end', paddingBottom: 3, fontSize: 17, fontStyle: 'italic', fontFamily: "'Snell Roundhand','Brush Script MT',cursive", color: t.body2 }}>Alex Diaz</div>
-            <div style={{ fontSize: 11, marginTop: 5 }}><b>Alex Diaz</b> · Merch Manager, Spring Music Fest<br /><span style={{ color: t.muted2 }}>May 16, 2026 · 11:58 PM</span></div>
+            <div style={{ fontSize: 11, marginTop: 5 }}><b>Alex Diaz</b> · Merch Manager, Furnace Fest<br /><span style={{ color: t.muted2 }}>May 16, 2026 · 11:58 PM</span></div>
           </div>
         </div>
 
