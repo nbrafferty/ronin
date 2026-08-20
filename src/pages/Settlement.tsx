@@ -4,7 +4,7 @@ import { AdminLayout } from '../components/AdminLayout'
 import { Btn, EditCell, PageHead, RateModeToggle } from '../components/ui'
 import { SignOffDrawer } from '../components/SignOff'
 import { tokens as t, money } from '../lib/tokens'
-import { eventConfig as cfg, type CustomLine } from '../lib/config'
+import { useConfig, type CustomLine } from '../lib/config'
 import { useCounts } from '../lib/counts'
 import { partyById, type Contact } from '../lib/parties'
 import { useSignOff } from '../lib/signoff'
@@ -65,6 +65,7 @@ const connector = <div style={{ flex: 1, height: 1.5, background: '#e0e0e0', mar
 export default function Settlement() {
   const nav = useNavigate()
   const { totals: countsTotals, flagged, partyId } = useCounts()
+  const { cfg } = useConfig()
   const party = partyById(partyId)
   const signoff = useSignOff()
   const [signOffOpen, setSignOffOpen] = useState(false)
@@ -188,7 +189,7 @@ export default function Settlement() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: `1px solid ${t.divider}` }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: t.heading }}>Fees &amp; deductions</div>
                     <div style={{ fontSize: 11, color: t.muted2 }}>
-                      🔒 contracted rates locked · from <Link to="/configurations">Configurations</Link>
+                      rates from <Link to="/configurations">Configurations</Link> — editable there at any point · re-settlement supported
                     </div>
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

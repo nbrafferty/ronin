@@ -19,7 +19,7 @@ const varColor = (v: number) => (v === 0 ? t.greenText2 : t.red)
  * Every lever declares which of the two sold columns it moves, so picking one visibly
  * closes the variance on that side:
  *   - `pos`     — the POS was wrong; snap POS SOLD to the physical count.
- *   - `counted` — the shelf was wrong; move COUNTED SOLD to the POS via waste or a count fix.
+ *   - `counted` — the shelf was wrong; move PHYSICAL COUNT to the POS via waste or a count fix.
  *   - `null`    — both counts stand as recorded; only money moves (or nothing does).
  */
 type Resolution = 'pos-error' | 'count-fix' | 'charge' | 'waive'
@@ -36,7 +36,7 @@ const levers: { id: Resolution; label: string; hint: string; affects: Affects; m
   {
     id: 'count-fix',
     label: 'Damage / miscount',
-    hint: 'Trust the POS — the missing units were never sold. Corrects Counted Sold.',
+    hint: 'Trust the POS — the missing units were never sold. Corrects Physical Count.',
     affects: 'counted',
     movesMoney: false,
   },
@@ -111,7 +111,7 @@ export default function Reconciliation() {
       // Trust the shelf → POS SOLD moves to the counted figure.
       setSku(s.id, { ...base, posSold: c.physicalSold })
     } else if (lever === 'count-fix') {
-      // Trust the POS → COUNTED SOLD moves to the rung figure.
+      // Trust the POS → PHYSICAL COUNT moves to the rung figure.
       if (c.variance < 0) {
         // Shelf says more sold than the POS rang: the difference was lost, not sold.
         setSku(s.id, { ...base, shrink: base.shrink + Math.abs(c.variance) })
@@ -179,7 +179,7 @@ export default function Reconciliation() {
           <div style={{ fontSize: 11.5, color: t.secondary, background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: '9px 14px', marginBottom: 12, lineHeight: 1.5 }}>
             <b style={{ color: t.heading }}>Each resolution corrects one column.</b>{' '}
             <b style={{ color: t.greenText }}>POS mis-ring</b> trusts the shelf and moves <b>POS Sold</b>;{' '}
-            <b style={{ color: t.greenText }}>{cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : 'Damage / miscount'}</b> trusts the POS and moves <b>Counted Sold</b>;{' '}
+            <b style={{ color: t.greenText }}>{cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : 'Damage / miscount'}</b> trusts the POS and moves <b>Physical Count</b>;{' '}
             <b style={{ color: t.red }}>Charge vendor</b> and <b>Festival absorbs</b> leave both counts as recorded. Neither column is typed into directly — corrections come from the resolution, and corrected cells show what they were.
           </div>
         )}
@@ -196,7 +196,7 @@ export default function Reconciliation() {
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>INITIAL COUNT</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>RE-UPS</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>ENDING COUNT</th>
-                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>COUNTED SOLD</th>
+                      <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>PHYSICAL COUNT</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>POS SOLD</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 8px' }}>VARIANCE</th>
                       <th style={{ ...th, textAlign: 'right', padding: '10px 14px' }}>$ VARIANCE</th>
@@ -223,7 +223,7 @@ export default function Reconciliation() {
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: c.added ? t.greenText2 : t.faint }}>{c.added ? `+${c.added}` : '—'}</td>
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: t.secondary }}>{s.ending}</td>
 
-                          {/* COUNTED SOLD — moved by the "damage / miscount" lever */}
+                          {/* PHYSICAL COUNT — moved by the "damage / miscount" lever */}
                           <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', background: countedMoved ? t.greenBg : undefined }}>
                             <div style={{ fontWeight: 700, color: countedMoved ? t.greenText : t.heading }}>{c.physicalSold}</div>
                             {countedMoved && <WasNote from={before.physicalSold} />}
@@ -249,7 +249,7 @@ export default function Reconciliation() {
                               {levers.map((l) => {
                                 const on = chosen === l.id
                                 // Label the column this lever moves, so the effect is obvious before clicking.
-                                const target = l.affects === 'pos' ? '→ POS Sold' : l.affects === 'counted' ? '→ Counted Sold' : null
+                                const target = l.affects === 'pos' ? '→ POS Sold' : l.affects === 'counted' ? '→ Physical Count' : null
                                 const label = l.id === 'count-fix' && cfgK.shrinkLabel === 'WASTE' ? 'Waste / miscount' : l.label
                                 return (
                                   <button

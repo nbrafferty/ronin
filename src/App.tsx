@@ -2,6 +2,8 @@ import { HashRouter, Routes, Route } from 'react-router-dom'
 import { RoleProvider } from './lib/roles'
 import { CountsProvider } from './lib/counts'
 import { SignOffProvider } from './lib/signoff'
+import { ConfigProvider } from './lib/config'
+import { AdvanceProvider } from './lib/advance'
 import Home from './pages/Home'
 import Planning from './pages/Planning'
 import ItemBuilder from './pages/ItemBuilder'
@@ -17,8 +19,10 @@ import Terms from './pages/Terms'
 export default function App() {
   return (
     <RoleProvider>
+      <ConfigProvider>
       <CountsProvider>
       <SignOffProvider>
+      <AdvanceProvider>
       <HashRouter>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -35,8 +39,10 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
         </Routes>
       </HashRouter>
+      </AdvanceProvider>
       </SignOffProvider>
       </CountsProvider>
+      </ConfigProvider>
     </RoleProvider>
   )
 }

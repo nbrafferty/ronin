@@ -4,9 +4,11 @@ import { AdminLayout } from '../components/AdminLayout'
 import { Btn, MetricTile, PageHead, StatusPill, type StatusKind } from '../components/ui'
 import { tokens as t, money } from '../lib/tokens'
 import { useRole } from '../lib/roles'
-import { eventConfig as cfg } from '../lib/config'
+import { useConfig } from '../lib/config'
 import { parties, type PartyKind } from '../lib/parties'
 import { useCounts } from '../lib/counts'
+import { useAdvance } from '../lib/advance'
+import { getPayoutInfo, payoutStatusMeta } from '../lib/stripe'
 
 /** Demo status per party — in the real build this comes off the count/settlement record. */
 const statusOf: Record<string, StatusKind> = {
@@ -27,6 +29,7 @@ export default function ManagerOverview() {
   const nav = useNavigate()
   const { canSee, role } = useRole()
   const { totalsFor, setPartyId } = useCounts()
+  const { cfg } = useConfig()
   const [view, setView] = useState<'table' | 'cards'>('table')
   const [filter, setFilter] = useState<StatusKind | 'all'>('all')
   // Merchandise and craft vendors are separate books — look at one at a time, or both.
@@ -179,15 +182,19 @@ export default function ManagerOverview() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <KindTag kind={p.kind} />
                     <span style={{ fontSize: 11, color: t.muted2 }}>{p.category}</span>
+                    <span style={{ flex: 1 }} />
+                    <AdvanceChip partyId={p.id} />
                   </div>
                   <div style={{ display: 'flex', gap: 0, borderTop: `1px solid ${t.divider3}`, borderBottom: `1px solid ${t.divider3}`, padding: '10px 0' }}>
                     <Stat flex={1} label="SOLD" value={tot.physicalSold ? tot.physicalSold.toLocaleString() : '—'} />
                     <Stat flex={1.2} label="GROSS" value={tot.physicalGross ? money(tot.physicalGross) : '—'} />
                     <Stat flex={1.2} label="DUE" value={tot.physicalGross ? money(tot.physicalGross * 0.649 * (p.splitPct / 80)) : '—'} />
                   </div>
+                  {/* Payout dates land on settled cards (2026-08-04 review, task 4) */}
+                  {status === 'settled' && <PayoutLine partyId={p.id} />}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 11.5, fontWeight: 600, color: tot.varianceUnits ? t.red : t.muted }}>
-                      {tot.varianceUnits ? `${Math.abs(tot.varianceUnits)} variance units` : status === 'settled' ? 'Payout sent' : 'No variances'}
+                      {tot.varianceUnits ? `${Math.abs(tot.varianceUnits)} variance units` : status === 'settled' ? 'Settled' : 'No variances'}
                     </span>
                     <span style={{ fontSize: 11.5, fontWeight: 700, color: t.red }}>Detail →</span>
                   </div>
@@ -217,7 +224,8 @@ export default function ManagerOverview() {
                   <tr key={p.id} onClick={() => open(p.id)} title="Open counts" style={{ cursor: 'pointer' }}>
                     <td style={{ padding: '9px 0 9px 14px', borderBottom: `1px solid ${t.divider3}`, color: t.muted2, fontSize: 10 }}>▸</td>
                     <td style={{ padding: '9px 8px', borderBottom: `1px solid ${t.divider3}`, fontWeight: 700, color: t.heading }}>
-                      {p.name} <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11 }}>{p.location}</span>
+                      {p.name} <span style={{ fontWeight: 500, color: t.muted2, fontSize: 11 }}>{p.location}</span>{' '}
+                      <AdvanceChip partyId={p.id} />
                     </td>
                     <td style={{ padding: '9px 10px', borderBottom: `1px solid ${t.divider3}` }}><KindTag kind={p.kind} /></td>
                     <td style={{ padding: '9px 10px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: '#666666' }}>{p.skus}</td>
@@ -230,7 +238,13 @@ export default function ManagerOverview() {
                     <td style={{ padding: '9px 10px', borderBottom: `1px solid ${t.divider3}`, textAlign: 'right', color: '#444444' }}>
                       {tot.physicalGross ? money(tot.physicalGross * 0.649 * (p.splitPct / 80)) : '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${t.divider3}` }}><StatusPill kind={status} /></td>
+                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${t.divider3}` }}>
+                      {/* Stripe payout status rides inside the existing status system — no extra column (task 5) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                        <StatusPill kind={status} />
+                        <PayoutPill partyId={p.id} />
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {filter === 'all' && (
@@ -257,6 +271,70 @@ export default function ManagerOverview() {
         </div>
       </main>
     </AdminLayout>
+  )
+}
+
+/**
+ * Stripe payout status pill (2026-08-04 review, task 5). Reads through the mocked
+ * `getPayoutInfo` seam — swap that one function for real Stripe wiring and this
+ * lights up untouched. Hidden until a payout exists, so the status column stays quiet.
+ */
+function PayoutPill({ partyId }: { partyId: string }) {
+  const info = getPayoutInfo(partyId)
+  if (info.status === 'not_requested') return null
+  const m = payoutStatusMeta[info.status]
+  const detail = [
+    info.requestedAt && `requested ${info.requestedAt}`,
+    info.scheduledFor && !info.paidAt && `lands ${info.scheduledFor}`,
+    info.paidAt && `paid ${info.paidAt}`,
+    info.last4 && `acct ····${info.last4}`,
+  ].filter(Boolean).join(' · ')
+  return (
+    <span
+      title={detail}
+      style={{ fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap', background: m.bg, color: m.color, border: `1px solid ${m.border}`, borderRadius: 999, padding: '2px 9px' }}
+    >
+      ⚡ {m.label}
+    </span>
+  )
+}
+
+/** Payout dates on a settled card (task 4) — with an explicit empty state. */
+function PayoutLine({ partyId }: { partyId: string }) {
+  const info = getPayoutInfo(partyId)
+  const m = payoutStatusMeta[info.status]
+  if (info.status === 'not_requested') {
+    return (
+      <div style={{ fontSize: 11.5, color: t.muted2, background: '#fafafa', border: `1px dashed ${t.inputBorder}`, borderRadius: 6, padding: '8px 10px' }}>
+        Settled — payout not yet requested
+      </div>
+    )
+  }
+  return (
+    <div style={{ fontSize: 11.5, background: m.bg, border: `1px solid ${m.border}`, borderRadius: 6, padding: '8px 10px', color: m.color, lineHeight: 1.45 }}>
+      <b>⚡ {m.label}</b>
+      {info.last4 && <span> · Stripe ····{info.last4}</span>}
+      <div style={{ color: t.secondary2 }}>
+        {info.paidAt
+          ? <>Paid out <b style={{ color: m.color }}>{info.paidAt}</b>{info.requestedAt && <> · requested {info.requestedAt}</>}</>
+          : <>{info.requestedAt && <>Requested {info.requestedAt} · </>}scheduled transfer <b style={{ color: t.heading }}>{info.scheduledFor ?? 'TBD'}</b></>}
+      </div>
+    </div>
+  )
+}
+
+/** Advance readiness at a glance (task 7e) — which parties are fully advanced. */
+function AdvanceChip({ partyId }: { partyId: string }) {
+  const advance = useAdvance()
+  const s = advance.readinessSummary(partyId)
+  const ok = s.complete
+  return (
+    <span
+      title={ok ? 'Advance complete' : `Advance ${s.done}/${s.total} — see the party's Advance tab`}
+      style={{ fontSize: 9.5, fontWeight: 700, whiteSpace: 'nowrap', verticalAlign: 'middle', background: ok ? t.greenBg : '#fdf6ec', color: ok ? t.greenText : '#8a5d12', border: `1px solid ${ok ? t.greenBorder : '#f0dcae'}`, borderRadius: 999, padding: '1px 8px' }}
+    >
+      {ok ? 'ADVANCED ✓' : `ADV ${s.done}/${s.total}`}
+    </span>
   )
 }
 
